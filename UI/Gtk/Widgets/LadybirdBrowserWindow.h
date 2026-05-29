@@ -25,5 +25,8 @@ GtkLabel* browser_window_find_result_label(LadybirdBrowserWindow*);
 GMenu* browser_window_hamburger_menu(LadybirdBrowserWindow*);
 AdwToastOverlay* browser_window_toast_overlay(LadybirdBrowserWindow*);
 GtkMenuButton* browser_window_menu_button(LadybirdBrowserWindow*);
+GtkButton* browser_window_overview_button(LadybirdBrowserWindow* window);
+AdwTabOverview* browser_window_overview(LadybirdBrowserWindow* window);
+AdwClamp* browser_window_location_entry_clamp(LadybirdBrowserWindow* window);
 
 }

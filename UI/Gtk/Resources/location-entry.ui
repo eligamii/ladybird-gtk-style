@@ -5,20 +5,20 @@
   <object class="GtkPopover" id="completion_popover">
     <property name="autohide">false</property>
     <property name="has-arrow">false</property>
-    <property name="position">bottom</property>
-    <property name="halign">start</property>
-    <property name="child">
+    <property name="position">3</property>
+    <property name="halign">1</property>
+    <child>
       <object class="GtkScrolledWindow">
-        <property name="hscrollbar-policy">never</property>
-        <property name="vscrollbar-policy">automatic</property>
-        <property name="max-content-height">300</property>
+        <property name="hscrollbar-policy">2</property>
+        <property name="vscrollbar-policy">1</property>
+        <property name="max-content-height">500</property>
         <property name="propagate-natural-height">true</property>
-        <property name="child">
+        <child>
           <object class="GtkListBox" id="completion_list_box">
-            <property name="selection-mode">browse</property>
+            <property name="selection-mode">2</property>
           </object>
-        </property>
+        </child>
       </object>
-    </property>
+    </child>
   </object>
 </interface>

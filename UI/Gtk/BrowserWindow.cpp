@@ -82,9 +82,11 @@ void BrowserWindow::register_actions()
     };
 
     add_action("new-tab", [](BrowserWindow& self) { self.create_new_tab(Web::HTML::ActivateTab::Yes); });
-    add_action("new-window", [](BrowserWindow&) { Application::the().new_window({}); });
+    add_action("new-window", [](BrowserWindow&) { Application::the().new_window({ }); });
     add_action("close-tab", [](BrowserWindow& self) { self.close_current_tab(); });
     add_action("focus-location", [](BrowserWindow& self) { ladybird_location_entry_focus_and_select_all(self.m_location_entry); });
+
+    add_action("show-overview", [](BrowserWindow& self) { adw_tab_overview_set_open(self.m_overview, true); });
 
     add_action("go-back", [](BrowserWindow& self) {
         if (auto* tab = self.current_tab())
@@ -145,6 +147,15 @@ void BrowserWindow::setup_ui(AdwApplication* app)
     m_find_entry = LadybirdWidgets::browser_window_find_entry(browser_window_widget);
     m_find_result_label = LadybirdWidgets::browser_window_find_result_label(browser_window_widget);
     m_toast_overlay = LadybirdWidgets::browser_window_toast_overlay(browser_window_widget);
+    m_overview = LadybirdWidgets::browser_window_overview(browser_window_widget);
+    m_location_entry_clamp = LadybirdWidgets::browser_window_location_entry_clamp(browser_window_widget);
+
+    g_signal_connect_swapped(m_overview, "create-tab", G_CALLBACK(+[](BrowserWindow* self, AdwTabOverview* overview) {
+        auto const page = self->create_new_tab(Web::HTML::ActivateTab::Yes).tab_page();
+        adw_tab_overview_set_open(overview, false);
+        return page;
+    }),
+        this);
 
     // Connect find entry signals
     g_signal_connect_swapped(m_find_entry, "search-changed", G_CALLBACK(+[](BrowserWindow* self, GtkSearchEntry* entry) {
@@ -199,7 +210,7 @@ void BrowserWindow::setup_ui(AdwApplication* app)
         }
     });
 
-    adw_header_bar_set_title_widget(m_header_bar, GTK_WIDGET(m_location_entry));
+    adw_clamp_set_child(m_location_entry_clamp, GTK_WIDGET(m_location_entry));
 
     GObjectPtr developer_tools_submenu { g_menu_new() };
     GObjectPtr inspect_gmenu { create_application_menu(WebView::Application::the().inspect_menu(), [](WebView::Action& action) {

@@ -26,6 +26,9 @@ struct LadybirdBrowserWindow {
     GtkLabel* zoom_label { nullptr };
     AdwBanner* devtools_banner { nullptr };
     GMenu* hamburger_menu { nullptr };
+    GtkButton* overview_button { nullptr };
+    AdwTabOverview* overview { nullptr };
+    AdwClamp* location_entry_clamp { nullptr };
 };
 
 struct LadybirdBrowserWindowClass {
@@ -57,6 +60,9 @@ static void ladybird_browser_window_class_init(LadybirdBrowserWindowClass* klass
     gtk_widget_class_bind_template_child(widget_class, LadybirdBrowserWindow, zoom_label);
     gtk_widget_class_bind_template_child(widget_class, LadybirdBrowserWindow, devtools_banner);
     gtk_widget_class_bind_template_child(widget_class, LadybirdBrowserWindow, hamburger_menu);
+    gtk_widget_class_bind_template_child(widget_class, LadybirdBrowserWindow, overview_button);
+    gtk_widget_class_bind_template_child(widget_class, LadybirdBrowserWindow, overview);
+    gtk_widget_class_bind_template_child(widget_class, LadybirdBrowserWindow, location_entry_clamp);
 }
 
 static void ladybird_browser_window_init(LadybirdBrowserWindow* self)
@@ -84,5 +90,8 @@ GtkLabel* browser_window_find_result_label(LadybirdBrowserWindow* window) { retu
 GMenu* browser_window_hamburger_menu(LadybirdBrowserWindow* window) { return window->hamburger_menu; }
 AdwToastOverlay* browser_window_toast_overlay(LadybirdBrowserWindow* window) { return window->toast_overlay; }
 GtkMenuButton* browser_window_menu_button(LadybirdBrowserWindow* window) { return window->menu_button; }
+GtkButton* browser_window_overview_button(LadybirdBrowserWindow* window) { return window->overview_button; }
+AdwTabOverview* browser_window_overview(LadybirdBrowserWindow* window) { return window->overview; }
+AdwClamp* browser_window_location_entry_clamp(LadybirdBrowserWindow* window) { return window->location_entry_clamp; }
 
 }

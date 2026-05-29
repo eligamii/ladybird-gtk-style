@@ -75,6 +75,8 @@ private:
     GtkSearchEntry* m_find_entry { nullptr };
     GtkLabel* m_find_result_label { nullptr };
     AdwToastOverlay* m_toast_overlay { nullptr };
+    AdwTabOverview* m_overview { nullptr };
+    AdwClamp* m_location_entry_clamp { nullptr };
 
     struct ActionBinding {
         WebView::Action* action { nullptr };
