@@ -1,4 +1,17 @@
+:root {
+    --ease-out-quad: cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+
 .ladybird-list-popover-separator-row {
     background: transparent;
     margin: 0;
+}
+
+.ladybird-status-text {
+    margin: 8px;
+    padding: 3px 6px;
+    background: var(--popover-bg-color);
+    box-shadow: 1px 6px 6px var(--popover-shade-color);
+    border-radius: 8px;
+    border: 1px solid color-mix(in srgb, var(--border-color) 80%, transparent);
 }

@@ -28,5 +28,6 @@ GtkMenuButton* browser_window_menu_button(LadybirdBrowserWindow*);
 GtkButton* browser_window_overview_button(LadybirdBrowserWindow* window);
 AdwTabOverview* browser_window_overview(LadybirdBrowserWindow* window);
 AdwClamp* browser_window_location_entry_clamp(LadybirdBrowserWindow* window);
+GtkLabel* browser_window_status_text(LadybirdBrowserWindow* window);
 
 }

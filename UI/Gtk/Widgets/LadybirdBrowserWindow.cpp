@@ -29,6 +29,7 @@ struct LadybirdBrowserWindow {
     GtkButton* overview_button { nullptr };
     AdwTabOverview* overview { nullptr };
     AdwClamp* location_entry_clamp { nullptr };
+    GtkLabel* status_text { nullptr };
 };
 
 struct LadybirdBrowserWindowClass {
@@ -63,6 +64,7 @@ static void ladybird_browser_window_class_init(LadybirdBrowserWindowClass* klass
     gtk_widget_class_bind_template_child(widget_class, LadybirdBrowserWindow, overview_button);
     gtk_widget_class_bind_template_child(widget_class, LadybirdBrowserWindow, overview);
     gtk_widget_class_bind_template_child(widget_class, LadybirdBrowserWindow, location_entry_clamp);
+    gtk_widget_class_bind_template_child(widget_class, LadybirdBrowserWindow, status_text);
 }
 
 static void ladybird_browser_window_init(LadybirdBrowserWindow* self)
@@ -93,5 +95,6 @@ GtkMenuButton* browser_window_menu_button(LadybirdBrowserWindow* window) { retur
 GtkButton* browser_window_overview_button(LadybirdBrowserWindow* window) { return window->overview_button; }
 AdwTabOverview* browser_window_overview(LadybirdBrowserWindow* window) { return window->overview; }
 AdwClamp* browser_window_location_entry_clamp(LadybirdBrowserWindow* window) { return window->location_entry_clamp; }
+GtkLabel* browser_window_status_text(LadybirdBrowserWindow* window) { return window->status_text; }
 
 }

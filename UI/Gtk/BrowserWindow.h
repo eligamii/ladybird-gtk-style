@@ -52,6 +52,9 @@ public:
 
     void show_toast(AdwToast* toast);
 
+    void show_status_text(const char* text, int width);
+    void hide_status_text();
+
     static bool is_internal_url(URL::URL const& url);
 
 private:
@@ -77,6 +80,9 @@ private:
     AdwToastOverlay* m_toast_overlay { nullptr };
     AdwTabOverview* m_overview { nullptr };
     AdwClamp* m_location_entry_clamp { nullptr };
+    GtkLabel* m_status_text { nullptr };
+
+    guint m_status_text_hide_timeout_source_id { 0 };
 
     struct ActionBinding {
         WebView::Action* action { nullptr };

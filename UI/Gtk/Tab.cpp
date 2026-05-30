@@ -163,14 +163,19 @@ void Tab::setup_callbacks()
         gtk_widget_set_tooltip_text(root, nullptr);
     };
 
-    m_view->on_link_hover = [root](auto const& url) {
+    m_view->on_link_hover = [this](auto const& url) {
         auto url_string = url.serialize();
         auto byte_string = ByteString(url_string.bytes_as_string_view());
-        gtk_widget_set_tooltip_text(root, byte_string.characters());
+
+        if (m_window.current_tab()) {
+            m_window.show_status_text(byte_string.characters(), static_cast<int>(static_cast<double>(gtk_widget_get_width(GTK_WIDGET(m_window.gtk_window()))) / 2.1));
+        }
     };
 
-    m_view->on_link_unhover = [root]() {
-        gtk_widget_set_tooltip_text(root, nullptr);
+    m_view->on_link_unhover = [this]() {
+        if (m_window.current_tab()) {
+            m_window.hide_status_text();
+        }
     };
 
     m_view->on_new_web_view = [this](auto activate_tab, auto, auto page_index) -> String {
