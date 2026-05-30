@@ -9,6 +9,7 @@ set(GTK_UI_RESOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/Resources/browser-window.ui"
     "${CMAKE_CURRENT_SOURCE_DIR}/Resources/list-popover.ui"
     "${CMAKE_CURRENT_SOURCE_DIR}/Resources/location-entry.ui"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Resources/style.css"
 )
 
 set(GTK_GRESOURCE_XML "${CMAKE_CURRENT_SOURCE_DIR}/Resources/resources.gresource.xml")

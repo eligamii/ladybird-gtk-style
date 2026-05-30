@@ -33,6 +33,13 @@ static ListPopoverShell create_list_popover_shell(GtkWidget* parent)
     GObjectPtr builder { gtk_builder_new_from_resource("/org/ladybird/Ladybird/gtk/list-popover.ui") };
     auto* popover = LadybirdWidgets::get_builder_object<GtkPopover>(builder, "popover");
     auto* list_box = LadybirdWidgets::get_builder_object<GtkListBox>(builder, "list_box");
+
+    // To get placement right (otherwise will be horizontally misaligned by half the popover size)
+    if (gtk_widget_get_direction(GTK_WIDGET(popover)) == GTK_TEXT_DIR_LTR)
+        gtk_widget_set_halign(GTK_WIDGET(popover), GTK_ALIGN_START);
+    else
+        gtk_widget_set_halign(GTK_WIDGET(popover), GTK_ALIGN_END);
+
     gtk_widget_set_parent(GTK_WIDGET(popover), parent);
     return { popover, list_box };
 }
@@ -40,11 +47,8 @@ static ListPopoverShell create_list_popover_shell(GtkWidget* parent)
 static void append_select_option_row(GtkListBox* list_box, char const* label, bool selected, bool disabled, unsigned id, int margin_start)
 {
     auto* row = gtk_list_box_row_new();
-    auto* box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+    auto* box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 2);
     gtk_widget_set_margin_start(box, margin_start);
-    gtk_widget_set_margin_end(box, 8);
-    gtk_widget_set_margin_top(box, 4);
-    gtk_widget_set_margin_bottom(box, 4);
 
     if (selected) {
         auto* check = gtk_image_new_from_icon_name("object-select-symbolic");
@@ -325,10 +329,13 @@ void Tab::show_select_dropdown(Gfx::IntPoint content_position, i32 minimum_width
     gtk_popover_set_pointing_to(GTK_POPOVER(popover), &rect);
     gtk_list_box_set_selection_mode(GTK_LIST_BOX(list_box), GTK_SELECTION_NONE);
 
+    int last_separator_index = -1;
+    int i = 0;
+
     for (auto const& item : items) {
         item.visit(
             [&](Web::HTML::SelectItemOption const& option) {
-                append_select_option_row(list_box, option.label.to_byte_string().characters(), option.selected, option.disabled, option.id, 8);
+                append_select_option_row(list_box, option.label.to_byte_string().characters(), option.selected, option.disabled, option.id, 0);
             },
             [&](Web::HTML::SelectItemOptionGroup const& group) {
                 auto* header = gtk_label_new(group.label.to_byte_string().characters());
@@ -344,17 +351,25 @@ void Tab::show_select_dropdown(Gfx::IntPoint content_position, i32 minimum_width
                 gtk_list_box_append(GTK_LIST_BOX(list_box), header_row);
 
                 for (auto const& option : group.items) {
-                    append_select_option_row(list_box, option.label.to_byte_string().characters(), option.selected, option.disabled, option.id, 16);
+                    append_select_option_row(list_box, option.label.to_byte_string().characters(), option.selected, option.disabled, option.id, 8);
                 }
             },
             [&](Web::HTML::SelectItemSeparator const&) {
-                auto* sep_row = gtk_list_box_row_new();
-                gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(sep_row), gtk_separator_new(GTK_ORIENTATION_HORIZONTAL));
-                gtk_list_box_row_set_activatable(GTK_LIST_BOX_ROW(sep_row), FALSE);
-                gtk_list_box_row_set_selectable(GTK_LIST_BOX_ROW(sep_row), FALSE);
-                gtk_list_box_append(GTK_LIST_BOX(list_box), sep_row);
+                // Mimic Qt's behavior: remove all leading, trailing and consecutive separators
+                if (i > 0 && i != last_separator_index + 1 && i < static_cast<int>(items.size() - 1)) {
+                    auto* sep_row = gtk_list_box_row_new();
+                    gtk_widget_add_css_class(sep_row, "ladybird-list-popover-separator-row");
+                    gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(sep_row), gtk_separator_new(GTK_ORIENTATION_HORIZONTAL));
+                    gtk_list_box_row_set_activatable(GTK_LIST_BOX_ROW(sep_row), FALSE);
+                    gtk_list_box_row_set_selectable(GTK_LIST_BOX_ROW(sep_row), FALSE);
+                    gtk_list_box_append(GTK_LIST_BOX(list_box), sep_row);
+                }
+
+                last_separator_index = i;
             },
             [&](auto const&) {});
+
+        i++;
     }
 
     struct DropdownState {

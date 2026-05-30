@@ -39,6 +39,13 @@ NonnullOwnPtr<Core::EventLoop> Application::create_platform_event_loop()
         if (g_application_get_is_remote(G_APPLICATION(m_adw_application)))
             forward_urls_to_remote_and_exit();
 
+        // Register CSS stylesheet
+        // NB: This is supposed to be done in GtkApplication::startup signal,
+        // but seems to only work here.
+        auto* provider = gtk_css_provider_new();
+        gtk_css_provider_load_from_resource(provider, "/org/ladybird/Ladybird/gtk/style.css");
+        gtk_style_context_add_provider_for_display(gdk_display_get_default(), GTK_STYLE_PROVIDER(provider), GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+
         setup_dbus_handlers();
     }
 
@@ -104,8 +111,9 @@ void Application::on_activate()
 {
     if (auto* window = active_window())
         window->present();
-    else
+    else {
         new_window({});
+    }
 }
 
 BrowserWindow& Application::new_window(Vector<URL::URL> const& initial_urls)
