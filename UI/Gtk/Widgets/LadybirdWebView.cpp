@@ -64,6 +64,15 @@ static void ladybird_web_view_size_allocate(GtkWidget* widget, int width, int he
     auto* self = LADYBIRD_WEB_VIEW(widget);
     if (self->impl)
         self->impl->update_viewport_size(width, height);
+
+    auto* child = gtk_widget_get_first_child(widget);
+
+    while (child) {
+        if (GTK_IS_POPOVER(child))
+            gtk_popover_present(GTK_POPOVER(child));
+
+        child = gtk_widget_get_next_sibling(child);
+    }
 }
 
 static void ladybird_web_view_class_init(LadybirdWebViewClass* klass)
