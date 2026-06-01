@@ -235,6 +235,8 @@ public:
     bool record_display_list_and_scroll_state(PaintConfig);
     void paint_next_frame();
     void render_screenshot(Gfx::PaintingSurface&, PaintConfig, Function<void()>&& callback);
+    Painting::DisplayListResourceStorage& display_list_resource_storage() { return m_display_list_resource_storage; }
+    Painting::DisplayListResourceStorage const& display_list_resource_storage() const { return m_display_list_resource_storage; }
 
     bool needs_repaint() const { return m_needs_repaint; }
     void set_needs_repaint() { m_needs_repaint = true; }
@@ -257,6 +259,8 @@ public:
     bool pending_set_browser_zoom_request() const { return m_pending_set_browser_zoom_request; }
 
     void set_should_show_line_box_borders(bool);
+    void set_should_show_caret_hit_test_debug_overlay(bool);
+    bool should_show_caret_hit_test_debug_overlay() const { return m_should_show_caret_hit_test_debug_overlay; }
 
     bool is_svg_page() const { return m_is_svg_page; }
 
@@ -344,6 +348,7 @@ private:
     bool m_needs_to_record_display_list { true };
     bool m_pending_set_browser_zoom_request { false };
     bool m_should_show_line_box_borders { false };
+    bool m_should_show_caret_hit_test_debug_overlay { false };
     Optional<PaintConfig> m_compositor_display_list_paint_config;
     Painting::DisplayListResourceStorage m_display_list_resource_storage;
     Painting::DisplayListResourceSet m_compositor_display_list_resources;

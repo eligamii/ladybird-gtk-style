@@ -32,12 +32,11 @@ DisplayListRecorder::CommandCapture::~CommandCapture()
         m_recorder->end_capture();
 }
 
-DisplayListCommandSequence DisplayListRecorder::CommandCapture::take()
+ByteBuffer DisplayListRecorder::CommandCapture::take()
 {
     VERIFY(m_recorder);
-    auto commands = m_recorder->m_display_list.copy_command_sequence_from(
-        m_recorder->m_capture_start_command_offset,
-        m_recorder->m_resource_storage);
+    auto commands = m_recorder->m_display_list.copy_command_bytes_from(
+        m_recorder->m_capture_start_command_offset);
     m_recorder->m_is_capturing = false;
     m_recorder = nullptr;
     return commands;
@@ -63,7 +62,7 @@ public:
         : m_payload_start_offset(display_list.command_byte_size() + sizeof(DisplayListCommandHeader))
         , m_payload_size(sizeof(Command))
     {
-        VERIFY(display_list.command_byte_size() % DisplayListCommandSequence::command_alignment == 0);
+        VERIFY(display_list.command_byte_size() % DisplayList::command_alignment == 0);
     }
 
     DisplayListDataSpan append_data(ReadonlyBytes bytes, size_t alignment)
@@ -192,6 +191,22 @@ static DisplayListGradientColorStops append_color_stops(
 }
 
 template<DisplayListCommand Command>
+static DisplayListDataSpan append_glyphs(
+    CommandPayloadBuilder<Command>& payload_builder,
+    Gfx::GlyphRun const& glyph_run)
+{
+    Vector<DisplayListGlyph> display_list_glyphs;
+    display_list_glyphs.ensure_capacity(glyph_run.glyphs().size());
+    for (auto const& glyph : glyph_run.glyphs()) {
+        display_list_glyphs.unchecked_append({
+            .position = glyph.position,
+            .glyph_id = glyph.glyph_id,
+        });
+    }
+    return payload_builder.append_objects(display_list_glyphs.span());
+}
+
+template<DisplayListCommand Command>
 static DisplayListGradientColorStops append_color_stops(
     CommandPayloadBuilder<Command>& payload_builder,
     ColorStopData const& color_stops)
@@ -276,12 +291,12 @@ static DisplayListDataSpan append_filter_data(
     return payload_builder.append_data(filter_data, alignof(u32));
 }
 
-void DisplayListRecorder::replay_cached_commands(DisplayListCommandSequence const& commands)
+void DisplayListRecorder::replay_cached_commands(ReadonlyBytes command_bytes)
 {
-    commands.for_each_command_header([&](DisplayListCommandHeader const& header, ReadonlyBytes) {
+    DisplayList::for_each_command_header(command_bytes, [&](DisplayListCommandHeader const& header, ReadonlyBytes) {
         m_save_nesting_level += display_list_command_nesting_level_change(header.type);
     });
-    m_display_list.append_command_sequence(commands, m_visual_context_tree, m_accumulated_visual_context_index, m_resource_storage);
+    m_display_list.append_command_sequence(command_bytes, m_visual_context_tree, m_accumulated_visual_context_index);
 }
 
 void DisplayListRecorder::paint_nested_display_list(DisplayListResource const& display_list, Gfx::IntRect rect)
@@ -586,7 +601,7 @@ void DisplayListRecorder::draw_glyph_run(Gfx::FloatPoint baseline_start, Gfx::Gl
         return;
     glyph_run.ensure_text_blob(scale);
     CommandPayloadBuilder<DrawGlyphRun> payload_builder(m_display_list);
-    auto glyphs = payload_builder.append_objects(glyph_run.glyphs().span());
+    auto glyphs = append_glyphs(payload_builder, glyph_run);
     auto glyph_bounding_rect = glyph_run.cached_blob_bounds().translated(baseline_start).to_rounded<int>();
     append_command(
         DrawGlyphRun {
@@ -657,7 +672,7 @@ void DisplayListRecorder::paint_text_shadow(int blur_radius, Gfx::IntRect boundi
 {
     glyph_run.ensure_text_blob(glyph_run_scale);
     CommandPayloadBuilder<PaintTextShadow> payload_builder(m_display_list);
-    auto glyphs = payload_builder.append_objects(glyph_run.glyphs().span());
+    auto glyphs = append_glyphs(payload_builder, glyph_run);
     append_command(
         PaintTextShadow {
             .font_id = resource_storage().add_font(glyph_run.font()),
@@ -726,6 +741,11 @@ void DisplayListRecorder::compositor_sticky_area(CompositorStickyArea const& sti
 }
 
 void DisplayListRecorder::compositor_wheel_hit_test_target(CompositorWheelHitTestTarget const& target)
+{
+    append_command(target);
+}
+
+void DisplayListRecorder::compositor_wheel_hit_test_target_with_corner_radii(CompositorWheelHitTestTargetWithCornerRadii const& target)
 {
     append_command(target);
 }

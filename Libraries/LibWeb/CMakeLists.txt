@@ -334,6 +334,7 @@ set(SOURCES
     DOM/AnchorNameMap.cpp
     DOM/Attr.cpp
     DOM/CDATASection.cpp
+    DOM/CaretPosition.cpp
     DOM/CharacterData.cpp
     DOM/Comment.cpp
     DOM/CustomEvent.cpp
@@ -477,11 +478,13 @@ set(SOURCES
     HTML/BroadcastChannelMessage.cpp
     HTML/BrowsingContext.cpp
     HTML/BrowsingContextGroup.cpp
+    HTML/Canvas/AbstractCanvasMixin.cpp
     HTML/Canvas/CanvasDrawImage.cpp
     HTML/Canvas/CanvasFillStrokeStyles.cpp
     HTML/Canvas/CanvasPath.cpp
     HTML/Canvas/CanvasState.cpp
     HTML/Canvas/CanvasTextDrawingStyles.cpp
+    HTML/Canvas/DrawingState.cpp
     HTML/Canvas/SerializeBitmap.cpp
     HTML/CanvasGradient.cpp
     HTML/CanvasPattern.cpp
@@ -782,6 +785,7 @@ set(SOURCES
     Layout/NavigableContainerViewport.cpp
     Layout/Node.cpp
     Layout/RadioButton.cpp
+    Layout/RangeInputBox.cpp
     Layout/ReplacedBox.cpp
     Layout/ReplacedWithChildrenFormattingContext.cpp
     Layout/SVGBox.cpp
@@ -868,6 +872,7 @@ set(SOURCES
     Painting/DisplayListResourceStorage.cpp
     Painting/FieldSetPaintable.cpp
     Painting/GradientPainting.cpp
+    Painting/HitTestDisplayList.cpp
     Painting/ImagePaintable.cpp
     Painting/MarkerPaintable.cpp
     Painting/NavigableContainerViewportPaintable.cpp

@@ -230,7 +230,7 @@ JS::Object* Internals::hit_test(double x, double y)
     //       for stacking context traversal, might not exist if this call occurs between the tear_down_layout_tree()
     //       and update_layout() calls
     active_document.update_layout(DOM::UpdateLayoutReason::InternalsHitTest);
-    auto result = active_document.paintable_box()->hit_test({ x, y }, Painting::HitTestType::Exact);
+    auto result = active_document.hit_test({ x, y }, Painting::HitTestType::Exact);
     if (result.has_value()) {
         auto hit_testing_result = JS::Object::create(realm(), nullptr);
         hit_testing_result->define_direct_property("node"_utf16_fly_string, result->dom_node(), JS::default_attributes);
@@ -792,8 +792,7 @@ static Optional<AsyncScrollingStateSnapshot> capture_async_scrolling_state(DOM::
     auto document_paintable = document.paintable();
     if (!navigable || !document_paintable)
         return {};
-    Painting::DisplayListResourceStorage resource_storage;
-    auto display_list = document.record_display_list(HTML::PaintConfig {}, resource_storage);
+    auto display_list = document.record_display_list(HTML::PaintConfig {}, navigable->display_list_resource_storage());
     if (!display_list)
         return {};
     return AsyncScrollingStateSnapshot {

@@ -112,6 +112,11 @@ Messages::WebContentServer::InitTransportResponse ConnectionFromClient::init_tra
     VERIFY_NOT_REACHED();
 }
 
+void ConnectionFromClient::initialize(u64 initial_page_id)
+{
+    m_page_host->initialize(initial_page_id);
+}
+
 Optional<PageClient&> ConnectionFromClient::page(u64 index, SourceLocation location)
 {
     if (auto page = m_page_host->page(index); page.has_value())
@@ -460,6 +465,13 @@ void ConnectionFromClient::debug_request(u64 page_id, ByteString request, ByteSt
         bool state = argument == "on";
         auto traversable = page->page().top_level_traversable();
         traversable->set_should_show_line_box_borders(state);
+        return;
+    }
+
+    if (request == "set-caret-hit-test-debug-overlay") {
+        bool state = argument == "on";
+        auto traversable = page->page().top_level_traversable();
+        traversable->set_should_show_caret_hit_test_debug_overlay(state);
         return;
     }
 

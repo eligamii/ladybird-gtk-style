@@ -7,7 +7,6 @@
 
 #pragma once
 
-#include <AK/Array.h>
 #include <AK/NonnullRefPtr.h>
 #include <AK/OwnPtr.h>
 #include <AK/RefPtr.h>
@@ -49,6 +48,7 @@ public:
     virtual void reset_for_relayout();
 
     virtual void paint(DisplayListRecordingContext&, PaintPhase) const override;
+    virtual void record_hit_test_items(DisplayListRecordingContext&, PaintPhase) const;
     void record_async_scrolling_metadata(DisplayListRecordingContext&) const;
 
     RefPtr<StackingContext> stacking_context();
@@ -137,6 +137,10 @@ public:
     CSSPixels absolute_y() const { return absolute_rect().y(); }
     CSSPixelPoint absolute_position() const { return absolute_rect().location(); }
 
+    void set_containing_line_box_data(LineBoxData line_box_data) { m_containing_line_box_data = line_box_data; }
+    Optional<LineBoxData> const& containing_line_box_data() const { return m_containing_line_box_data; }
+    Optional<CSSPixelRect> absolute_containing_line_box_rect() const;
+
     CSSPixelPoint transform_to_local_coordinates(CSSPixelPoint position) const;
 
     [[nodiscard]] bool has_scrollable_overflow() const
@@ -170,9 +174,6 @@ public:
     void set_overflow_data(OverflowData data) { m_overflow_data = move(data); }
 
     virtual void set_needs_repaint(InvalidateDisplayList = InvalidateDisplayList::Yes) override;
-
-    [[nodiscard]] virtual TraversalDecision hit_test(CSSPixelPoint position, HitTestType type, Function<TraversalDecision(HitTestResult)> const& callback) const override;
-    Optional<HitTestResult> hit_test(CSSPixelPoint, HitTestType) const;
 
     virtual bool handle_mousewheel(Badge<EventHandler>, CSSPixelPoint, unsigned buttons, unsigned modifiers, double wheel_delta_x, double wheel_delta_y) override;
 
@@ -302,22 +303,11 @@ public:
 
     static constexpr size_t paint_phase_count = to_underlying(PaintPhase::Overlay) + 1;
 
-    void invalidate_paint_cache() const { m_cached_phase_commands = {}; }
+    void invalidate_paint_cache() const;
 
-    bool has_cached_commands(PaintPhase phase) const
-    {
-        return m_cached_phase_commands[to_underlying(phase)].has_value();
-    }
-
-    DisplayListCommandSequence const& cached_commands(PaintPhase phase) const
-    {
-        return m_cached_phase_commands[to_underlying(phase)].value();
-    }
-
-    void set_cached_commands(PaintPhase phase, DisplayListCommandSequence commands) const
-    {
-        m_cached_phase_commands[to_underlying(phase)] = move(commands);
-    }
+    bool has_cached_commands(PaintPhase) const;
+    ReadonlyBytes cached_commands(PaintPhase) const;
+    void set_cached_commands(PaintPhase phase, ByteBuffer const& commands) const;
 
     void set_fixed_background_visual_context(VisualContextIndex index) { m_fixed_background_visual_context = index; }
     [[nodiscard]] Optional<VisualContextIndex> fixed_background_visual_context() const { return m_fixed_background_visual_context; }
@@ -339,17 +329,17 @@ protected:
 
     virtual CSSPixelRect compute_absolute_rect() const;
 
-    [[nodiscard]] TraversalDecision hit_test_children(CSSPixelPoint position, HitTestType type, Function<TraversalDecision(HitTestResult)> const& callback) const;
-    [[nodiscard]] TraversalDecision hit_test_continuation(Function<TraversalDecision(HitTestResult)> const& callback) const;
-    [[nodiscard]] TraversalDecision hit_test_chrome(CSSPixelPoint adjusted_position, Function<TraversalDecision(HitTestResult)> const& callback) const;
-
     CSSPixels available_scrollbar_length(ScrollDirection direction, ChromeMetrics const& chrome_metrics) const;
     Optional<CSSPixelRect> absolute_resizer_rect(ChromeMetrics const& chrome_metrics) const;
 
 private:
+    struct CachedPaintData;
+
     [[nodiscard]] virtual bool is_paintable_box() const final { return true; }
 
     void paint_middle_button_scroll_indicator(DisplayListRecordingContext&) const;
+    void acquire_cache_references_for_cached_commands(ReadonlyBytes) const;
+    void release_cache_references_for_cached_commands(ReadonlyBytes) const;
 
     RefPtr<StackingContext> m_stacking_context;
 
@@ -370,6 +360,7 @@ private:
 
     Optional<BordersDataWithElementKind> m_override_borders_data;
     Optional<TableCellCoordinates> m_table_cell_coordinates;
+    Optional<LineBoxData> m_containing_line_box_data;
 
     ResolvedCSSFilter m_filter;
 
@@ -393,7 +384,7 @@ private:
     bool m_fragment_right_edge_away { false };
     bool m_fragment_bottom_edge_away { false };
 
-    mutable Array<Optional<DisplayListCommandSequence>, paint_phase_count> m_cached_phase_commands;
+    mutable OwnPtr<CachedPaintData> m_cached_paint_data;
 };
 
 }

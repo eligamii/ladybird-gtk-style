@@ -38,6 +38,8 @@ enum class ActionID {
     TakeVisibleScreenshot,
     TakeFullScreenshot,
 
+    ToggleVerticalTabsExpanded,
+
     ManageBookmarks,
     ToggleBookmark,
     ToggleBookmarkViaToolbar,
@@ -100,8 +102,10 @@ enum class ActionID {
     DumpGCGraph,
     DumpWasmStats,
     ShowLineBoxBorders,
+    ShowCaretHitTestDebugOverlay,
     CollectGarbage,
     CrashCurrentPage,
+    CrashCompositorProcess,
     SpoofUserAgent,
     NavigatorCompatibilityMode,
     EnableScripting,

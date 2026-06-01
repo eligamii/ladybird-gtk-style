@@ -14,6 +14,7 @@
 #include <LibWeb/Layout/ReplacedBox.h>
 #include <LibWeb/Layout/Viewport.h>
 #include <LibWeb/Page/Page.h>
+#include <LibWeb/Painting/BackgroundPainting.h>
 #include <LibWeb/Painting/DisplayList.h>
 #include <LibWeb/Painting/DisplayListRecorder.h>
 #include <LibWeb/Painting/PaintableBox.h>
@@ -40,17 +41,21 @@ static void paint_node(Paintable const& paintable, DisplayListRecordingContext& 
             context.display_list_recorder().set_accumulated_visual_context(paintable_box->accumulated_visual_context_index());
     }
 
-    if (paintable_box && phase == PaintPhase::Background)
-        paintable_box->record_async_scrolling_metadata(context);
+    if (paintable_box)
+        paintable_box->record_hit_test_items(context, phase);
 
     bool const skip_cache = !paintable_box || context.should_show_line_box_borders() || paintable_box->fixed_background_visual_context().has_value();
     if (!skip_cache && paintable_box->has_cached_commands(phase)) {
         context.display_list_recorder().replay_cached_commands(paintable_box->cached_commands(phase));
     } else if (!skip_cache) {
         auto capture = context.display_list_recorder().begin_command_capture();
+        if (phase == PaintPhase::Background)
+            paintable_box->record_async_scrolling_metadata(context);
         paintable.paint(context, phase);
         paintable_box->set_cached_commands(phase, capture.take());
     } else {
+        if (paintable_box && phase == PaintPhase::Background)
+            paintable_box->record_async_scrolling_metadata(context);
         paintable.paint(context, phase);
     }
 
@@ -265,7 +270,7 @@ void StackingContext::paint_internal(DisplayListRecordingContext& context) const
         paint_node(svg_svg_paintable, context, PaintPhase::Background);
         paint_node(svg_svg_paintable, context, PaintPhase::Border);
 
-        SVGSVGPaintable::paint_descendants(context, svg_svg_paintable, PaintPhase::Foreground);
+        SVGSVGPaintable::paint_svg_box(context, svg_svg_paintable, PaintPhase::Foreground);
 
         paint_node(svg_svg_paintable, context, PaintPhase::Outline);
         if (context.should_paint_overlay()) {
@@ -340,20 +345,13 @@ void StackingContext::paint(DisplayListRecordingContext& context) const
     if (paintable_box().has_non_invertible_css_transform())
         return;
 
-    if (paintable_box().computed_values().opacity() == 0.0f)
-        return;
-
     TemporaryChange save_nesting_level(context.display_list_recorder().m_save_nesting_level, 0);
     ScopeGuard verify_save_and_restore_are_balanced([&] {
         VERIFY(context.display_list_recorder().m_save_nesting_level == 0);
     });
 
     auto const& computed_values = paintable_box().computed_values();
-    auto mask_image = computed_values.mask_image();
-
-    if (mask_image) {
-        mask_image->resolve_for_size(paintable_box().layout_node_with_style_and_box_metrics(), paintable_box().absolute_padding_box_rect().size());
-    }
+    auto const& mask_layers = computed_values.mask_layers();
 
     auto effective_context_index = paintable_box().accumulated_visual_context_index();
     context.display_list_recorder().set_accumulated_visual_context(effective_context_index);
@@ -368,13 +366,16 @@ void StackingContext::paint(DisplayListRecordingContext& context) const
     // Collect all masks (CSS mask-image, SVG <mask>, SVG <clipPath>).
     Vector<DisplayListRecorder::MaskInfo> masks;
 
-    if (mask_image) {
+    if (!mask_layers.is_empty()) {
         auto visual_context_tree = AccumulatedVisualContextTree::create();
         auto mask_display_list = DisplayList::create(visual_context_tree);
         DisplayListRecorder display_list_recorder(*mask_display_list, visual_context_tree, context.display_list_recorder().resource_storage());
         auto mask_painting_context = context.clone(display_list_recorder);
-        auto mask_rect_in_device_pixels = context.enclosing_device_rect(paintable_box().absolute_padding_box_rect());
-        mask_image->paint(mask_painting_context, { {}, mask_rect_in_device_pixels.size() }, CSS::ImageRendering::Auto);
+        auto absolute_mask_rect = paintable_box().absolute_border_box_rect();
+        auto mask_rect_in_device_pixels = context.enclosing_device_rect(absolute_mask_rect);
+        auto mask_rect = CSSPixelRect { {}, absolute_mask_rect.size() };
+        auto resolved_mask = resolve_background_layers(mask_layers, paintable_box(), Color::Transparent, CSS::BackgroundBox::BorderBox, mask_rect, {});
+        paint_background(mask_painting_context, paintable_box(), CSS::ImageRendering::Auto, resolved_mask, {});
         masks.append({ { *mask_display_list, move(visual_context_tree) }, mask_rect_in_device_pixels.to_type<int>(), Gfx::MaskKind::Alpha });
     }
 
@@ -402,108 +403,6 @@ void StackingContext::paint(DisplayListRecordingContext& context) const
     context.display_list_recorder().set_accumulated_visual_context(context_before_children);
 
     context.display_list_recorder().end_masks(masks);
-}
-
-TraversalDecision StackingContext::hit_test(CSSPixelPoint position, HitTestType type, Function<TraversalDecision(HitTestResult)> const& callback) const
-{
-    // AD-HOC: Elements with non-invertible transforms are not displayed per the spec,
-    //         so they should not be hit-testable either.
-    if (paintable_box().has_non_invertible_css_transform())
-        return TraversalDecision::Continue;
-
-    auto const is_visible = paintable_box().computed_values().visibility() == CSS::Visibility::Visible;
-
-    // NOTE: Hit testing basically happens in reverse painting order.
-    // https://drafts.csswg.org/css2/#z-index
-
-    // 7. the child stacking contexts with positive stack levels (least positive first).
-    // NOTE: Hit testing follows reverse painting order, that's why the conditions here are reversed.
-    for (auto const& child : m_children.in_reverse()) {
-        if (child->paintable_box().effective_z_index().value_or(0) <= 0)
-            break;
-        if (child->hit_test(position, type, callback) == TraversalDecision::Break)
-            return TraversalDecision::Break;
-    }
-
-    // 6. the child stacking contexts with stack level 0 and the positioned descendants with stack level 0.
-    for (auto const& weak_paintable_box : m_positioned_descendants_and_stacking_contexts_with_stack_level_0.in_reverse()) {
-        auto paintable_box = weak_paintable_box.strong_ref();
-        if (!paintable_box)
-            continue;
-        if (paintable_box->stacking_context()) {
-            if (paintable_box->stacking_context()->hit_test(position, type, callback) == TraversalDecision::Break)
-                return TraversalDecision::Break;
-        } else {
-            if (paintable_box->hit_test(position, type, callback) == TraversalDecision::Break)
-                return TraversalDecision::Break;
-        }
-    }
-
-    // 5. the in-flow, inline-level, non-positioned descendants, including inline tables and inline blocks.
-    if (paintable_box().layout_node().children_are_inline() && is<Layout::BlockContainer>(paintable_box().layout_node())) {
-        for (auto paintable = paintable_box().last_child(); paintable; paintable = paintable->previous_sibling()) {
-            if (paintable->is_inline() && !paintable->is_absolutely_positioned() && !paintable->has_stacking_context()) {
-                if (paintable->hit_test(position, type, callback) == TraversalDecision::Break)
-                    return TraversalDecision::Break;
-            }
-        }
-
-        // Hit test the stacking context root's own fragments if it's a PaintableWithLines.
-        if (auto const* paintable_with_lines = as_if<PaintableWithLines>(paintable_box())) {
-            auto local_position = paintable_box().transform_point_to_local(position);
-
-            if (local_position.has_value()) {
-                if (paintable_with_lines->hit_test_fragments(position, local_position.value(), type, callback) == TraversalDecision::Break)
-                    return TraversalDecision::Break;
-            }
-        }
-    }
-
-    // 4. the non-positioned floats.
-    for (auto const& weak_paintable_box : m_non_positioned_floating_descendants.in_reverse()) {
-        auto paintable_box = weak_paintable_box.strong_ref();
-        if (!paintable_box)
-            continue;
-        if (paintable_box->hit_test(position, type, callback) == TraversalDecision::Break)
-            return TraversalDecision::Break;
-    }
-
-    // 3. the in-flow, non-inline-level, non-positioned descendants.
-    if (!paintable_box().layout_node().children_are_inline()) {
-        for (auto child = paintable_box().last_child(); child; child = child->previous_sibling()) {
-            if (!child->is_paintable_box())
-                continue;
-
-            auto const& paintable_box = as<PaintableBox>(*child);
-            if (!paintable_box.is_absolutely_positioned() && !paintable_box.is_floating() && !paintable_box.stacking_context()) {
-                if (paintable_box.hit_test(position, type, callback) == TraversalDecision::Break)
-                    return TraversalDecision::Break;
-            }
-        }
-    }
-
-    // 2. the child stacking contexts with negative stack levels (most negative first).
-    // NB: Hit testing follows reverse painting order, so we visit the least negative stack levels first.
-    for (auto const& child : m_children.in_reverse()) {
-        // Skip positive/ zero index child stacking contexts, which have already been handled above.
-        if (child->paintable_box().effective_z_index().value_or(0) >= 0)
-            continue;
-        if (child->hit_test(position, type, callback) == TraversalDecision::Break)
-            return TraversalDecision::Break;
-    }
-
-    // Hidden elements and elements with pointer-events: none shouldn't be hit.
-    if (!is_visible || !paintable_box().visible_for_hit_testing())
-        return TraversalDecision::Continue;
-
-    auto local_position = paintable_box().transform_point_to_local(position);
-
-    if (local_position.has_value() && paintable_box().absolute_border_box_rect().contains(local_position.value())) {
-        if (callback({ .paintable = const_cast<PaintableBox&>(paintable_box()) }) == TraversalDecision::Break)
-            return TraversalDecision::Break;
-    }
-
-    return TraversalDecision::Continue;
 }
 
 void StackingContext::dump(StringBuilder& builder, int indent) const

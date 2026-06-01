@@ -82,7 +82,7 @@ static ColorStopList replace_transition_hints_with_normal_color_stops(ColorStopL
         for (auto const& transition_hint_relative_sampling_position : transition_hint_relative_sampling_positions) {
             auto position = previous_color_stop.position + transition_hint_relative_sampling_position * distance_between_stops;
             auto value = Gfx::color_stop_step(previous_color_stop, next_color_stop, position);
-            auto color = previous_color_stop.color.interpolate(next_color_stop.color, value);
+            auto color = previous_color_stop.color.mixed_with(next_color_stop.color, value);
             stops_with_replaced_transition_hints.empend(color, position);
         }
 
@@ -109,7 +109,7 @@ static ColorStopList expand_repeat_length(ColorStopList const& color_stop_list, 
     auto get_color_between_stops = [](float position, auto const& current_stop, auto const& previous_stop) {
         auto distance_between_stops = current_stop.position - previous_stop.position;
         auto percentage = (position - previous_stop.position) / distance_between_stops;
-        return previous_stop.color.interpolate(current_stop.color, percentage);
+        return previous_stop.color.mixed_with(current_stop.color, percentage);
     };
 
     for (auto repeat_count = 1; repeat_count <= negative_repeat_count; repeat_count++) {
@@ -169,16 +169,19 @@ static ResolvedColorStopData resolve_color_stop_positions(Layout::NodeWithStyle 
             resolved_color_stops.append(resolved_stop);
     }
 
+    // https://drafts.csswg.org/css-images-3/#color-stop-fixup
     // 1. If the first color stop does not have a position, set its position to 0%.
-    resolved_color_stops.first().position = 0;
+    if (!color_stop_list.first().color_stop.position)
+        resolved_color_stops.first().position = 0;
     //    If the last color stop does not have a position, set its position to 100%
-    resolved_color_stops.last().position = 1.0f;
+    if (!color_stop_list.last().color_stop.second_position && !color_stop_list.last().color_stop.position)
+        resolved_color_stops.last().position = 1.0f;
 
     // 2. If a color stop or transition hint has a position that is less than the
     //    specified position of any color stop or transition hint before it in the list,
     //    set its position to be equal to the largest specified position of any color stop
     //    or transition hint before it.
-    auto max_previous_color_stop_or_hint = resolved_color_stops[0].position;
+    auto max_previous_color_stop_or_hint = -AK::Infinity<float>;
     auto resolve_stop_position = [&](CSS::StyleValue const& position) {
         float value = resolve_position_to_float(position);
         value = max(value, max_previous_color_stop_or_hint);
