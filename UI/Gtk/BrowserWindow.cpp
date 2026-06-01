@@ -573,8 +573,7 @@ void BrowserWindow::on_pointer_motion(double x, double y)
         GtkAlign align = gtk_widget_get_halign(status_text);
 
         // Compute the region where changing the alignment would not move the status text out
-        // of the pointer position, and hide the status text entirely if the pointer is on it
-        //
+        // of the pointer position, and restrict the size of the status text if the pointer is on it
         graphene_rect_t status_text_bounds;
         if (gtk_widget_compute_bounds(status_text, GTK_WIDGET(m_window), &status_text_bounds)) {
             float window_width = static_cast<float>(gtk_widget_get_width(GTK_WIDGET(m_window)));
@@ -586,7 +585,12 @@ void BrowserWindow::on_pointer_motion(double x, double y)
                 float problematic_part_origin = (window_width / 2) - (problematic_part_width / 2);
 
                 if (x >= problematic_part_origin && x <= problematic_part_origin + problematic_part_width) {
-                    animate_opacity(status_text, 0);
+                    auto* pango = gtk_widget_get_pango_context(GTK_WIDGET(m_status_text));
+                    auto* metrics = pango_context_get_metrics(pango, pango_context_get_font_description(pango), pango_context_get_language(pango));
+                    int width_chars = static_cast<int>(window_width / 2.3) / (pango_font_metrics_get_approximate_digit_width(metrics) / PANGO_SCALE);
+                    pango_font_metrics_unref(metrics);
+
+                    gtk_label_set_max_width_chars(m_status_text, width_chars);
                     return;
                 }
             }
@@ -603,8 +607,10 @@ void BrowserWindow::on_pointer_motion(double x, double y)
 
 void BrowserWindow::show_status_text(char const* text)
 {
-    if (gtk_widget_get_opacity(GTK_WIDGET(m_status_text)) == 0)
+    if (gtk_widget_get_opacity(GTK_WIDGET(m_status_text)) == 0) {
         gtk_widget_set_halign(GTK_WIDGET(m_status_text), GTK_ALIGN_START);
+        gtk_label_set_max_width_chars(m_status_text, -1);
+    }
 
     gtk_label_set_label(m_status_text, text);
 
