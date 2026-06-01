@@ -9,9 +9,10 @@
 
 .ladybird-status-text {
     margin: 8px;
-    padding: 3px 6px;
-    background: var(--popover-bg-color);
-    box-shadow: 1px 6px 6px var(--popover-shade-color);
-    border-radius: 8px;
+    padding: 3px 8px;
+    background: color-mix(in srgb, var(--popover-bg-color) 80%, transparent);
+    box-shadow: 1px 3px 3px var(--popover-shade-color);
+    border-radius: 32px;
     border: 1px solid color-mix(in srgb, var(--border-color) 80%, transparent);
+    backdrop-filter: blur(8px);
 }

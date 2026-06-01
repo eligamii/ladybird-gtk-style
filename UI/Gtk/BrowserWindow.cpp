@@ -251,27 +251,18 @@ void BrowserWindow::setup_ui(AdwApplication* app)
     if (WebView::Application::browser_options().devtools_port.has_value())
         on_devtools_enabled();
 
-    // Setup status text
+
+    // Setup signal for status text position
     GtkEventController* motion_controller = gtk_event_controller_motion_new();
 
-    g_signal_connect_swapped(m_tab_view, "notify::selected-page", G_CALLBACK(+[](BrowserWindow* self, GParamSpec*) {
-        self->on_tab_switched();
+    g_signal_connect_swapped(motion_controller, "motion", G_CALLBACK(+[](BrowserWindow* self, GtkEventControllerMotion*, gdouble x, gdouble y, gpointer) {
+        self->on_pointer_motion(x, y);
     }),
         this);
 
-    g_signal_connect_swapped(motion_controller, "motion", G_CALLBACK(+[](void*, GtkEventControllerMotion* controller, gdouble, gdouble, gpointer) {
-        auto* status_text = gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(controller));
-
-        GtkAlign align = gtk_widget_get_halign(status_text);
-        gtk_widget_set_halign(status_text, align == GTK_ALIGN_START ? GTK_ALIGN_END : GTK_ALIGN_START);
-        // Otherwise set_halign won't do anything
-        gtk_widget_queue_resize(status_text);
-
-    }),
-        nullptr);
-
-    gtk_widget_add_controller(GTK_WIDGET(m_status_text), motion_controller);
+    gtk_widget_add_controller(GTK_WIDGET(m_window), motion_controller);
 }
+
 
 void BrowserWindow::setup_keyboard_shortcuts()
 {
@@ -550,33 +541,79 @@ void BrowserWindow::show_toast(AdwToast* toast)
         adw_toast_overlay_add_toast(m_toast_overlay, toast);
 }
 
-void BrowserWindow::show_status_text(char const* text, int width)
+
+static void animate_opacity(GtkWidget* widget, double to)
 {
-    if (m_status_text_hide_timeout_source_id) {
-        if (g_main_context_find_source_by_id(g_main_context_default(), m_status_text_hide_timeout_source_id))
-            g_source_remove(m_status_text_hide_timeout_source_id);
+    double old_opacity = gtk_widget_get_opacity(widget);
+
+    AdwAnimation* old_animation = static_cast<AdwAnimation*>(g_object_get_data(G_OBJECT(widget), "opacity-animation"));
+
+    if (old_animation && ADW_IS_ANIMATION(old_animation))
+        adw_animation_pause(old_animation);
+
+    if (old_opacity == to)
+        return;
+
+    AdwAnimationTarget* target = adw_property_animation_target_new(G_OBJECT(widget), "opacity");
+
+    AdwAnimation* animation = adw_timed_animation_new(GTK_WIDGET(widget),old_opacity, to, 300, target);
+
+    adw_animation_play(animation);
+    g_object_set_data_full(G_OBJECT(widget), "opacity-animation", animation, g_object_unref);
+}
+
+void BrowserWindow::on_pointer_motion(double x, double y)
+{
+    if (!gtk_widget_is_visible(GTK_WIDGET(m_status_text)))
+        return;
+
+    auto* status_text = gtk_widget_pick(GTK_WIDGET(m_window), x, y, GTK_PICK_NON_TARGETABLE);
+
+    if (status_text == GTK_WIDGET(m_status_text)) {
+        GtkAlign align = gtk_widget_get_halign(status_text);
+
+        // Compute the region where changing the alignment would not move the status text out
+        // of the pointer position, and hide the status text entirely if the pointer is on it
+        //
+        graphene_rect_t status_text_bounds;
+        if (gtk_widget_compute_bounds(status_text, GTK_WIDGET(m_window), &status_text_bounds)) {
+            float window_width = static_cast<float>(gtk_widget_get_width(GTK_WIDGET(m_window)));
+
+            float margin = align == GTK_ALIGN_START ? status_text_bounds.origin.x : status_text_bounds.origin.x - window_width;
+            float problematic_part_width = ((status_text_bounds.size.width + margin) - (window_width / 2)) * 2;
+
+            if (problematic_part_width > 0) {
+                float problematic_part_origin = (window_width / 2) - (problematic_part_width / 2);
+
+                if (x >= problematic_part_origin && x <= problematic_part_origin + problematic_part_width) {
+                    animate_opacity(status_text, 0);
+                    return;
+                }
+            }
+        }
+
+        if (gtk_widget_get_opacity(status_text) > 0)
+            animate_opacity(status_text, 1.0);
+
+        gtk_widget_set_halign(status_text, align == GTK_ALIGN_START ? GTK_ALIGN_END : GTK_ALIGN_START);
+        // Otherwise set_halign won't do anything
+        gtk_widget_queue_resize(status_text);
     }
+}
 
-    auto* pango = gtk_widget_get_pango_context(GTK_WIDGET(m_status_text));
-    auto* metrics = pango_context_get_metrics(pango, pango_context_get_font_description(pango), pango_context_get_language(pango));
-    int width_chars = width / (pango_font_metrics_get_approximate_digit_width(metrics) / PANGO_SCALE);
-    pango_font_metrics_unref(metrics);
-
-    gtk_label_set_max_width_chars(m_status_text, width_chars);
+void BrowserWindow::show_status_text(char const* text)
+{
+    if (gtk_widget_get_opacity(GTK_WIDGET(m_status_text)) == 0)
+        gtk_widget_set_halign(GTK_WIDGET(m_status_text), GTK_ALIGN_START);
 
     gtk_label_set_label(m_status_text, text);
-    gtk_widget_set_visible(GTK_WIDGET(m_status_text), true);
+
+    animate_opacity(GTK_WIDGET(m_status_text), 1.0);
 }
 
 void BrowserWindow::hide_status_text()
 {
-    m_status_text_hide_timeout_source_id = g_timeout_add_once(
-        200,
-        [](void* status_text) {
-            gtk_widget_set_visible(GTK_WIDGET(status_text), false);
-            gtk_widget_set_halign(GTK_WIDGET(status_text), GTK_ALIGN_START);
-        },
-        m_status_text);
+    animate_opacity(GTK_WIDGET(m_status_text), 0.0);
 }
 
 }

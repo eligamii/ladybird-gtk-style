@@ -52,7 +52,7 @@ public:
 
     void show_toast(AdwToast* toast);
 
-    void show_status_text(const char* text, int width);
+    void show_status_text(const char* text);
     void hide_status_text();
 
     static bool is_internal_url(URL::URL const& url);
@@ -63,6 +63,7 @@ private:
     void setup_keyboard_shortcuts();
     void on_tab_close_request(AdwTabPage* page);
     void on_tab_switched();
+    void on_pointer_motion(double x, double y);
     void bind_navigation_actions(WebContentView& view);
 
     AdwApplicationWindow* m_window { nullptr };
@@ -81,8 +82,6 @@ private:
     AdwTabOverview* m_overview { nullptr };
     AdwClamp* m_location_entry_clamp { nullptr };
     GtkLabel* m_status_text { nullptr };
-
-    guint m_status_text_hide_timeout_source_id { 0 };
 
     struct ActionBinding {
         WebView::Action* action { nullptr };

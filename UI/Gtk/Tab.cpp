@@ -168,7 +168,7 @@ void Tab::setup_callbacks()
         auto byte_string = ByteString(url_string.bytes_as_string_view());
 
         if (m_window.current_tab()) {
-            m_window.show_status_text(byte_string.characters(), static_cast<int>(static_cast<double>(gtk_widget_get_width(GTK_WIDGET(m_window.gtk_window()))) / 2.1));
+            m_window.show_status_text(byte_string.characters());
         }
     };
 
