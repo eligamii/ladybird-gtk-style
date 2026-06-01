@@ -103,6 +103,7 @@ static void ladybird_location_entry_init(LadybirdLocationEntry* self)
     });
 
     gtk_widget_set_hexpand(GTK_WIDGET(self), TRUE);
+    gtk_widget_add_css_class(GTK_WIDGET(self), "ladybird-location-entry");
 
     if (auto const& search_engine = WebView::Application::settings().search_engine(); search_engine.has_value()) {
         auto placeholder = ByteString::formatted("Search with {} or enter URL", search_engine->name);
@@ -236,6 +237,7 @@ void ladybird_location_entry_set_loading(LadybirdLocationEntry* self, bool is_lo
 
     self->state->is_loading = is_loading;
     if (self->state->is_loading) {
+        gtk_widget_remove_css_class(GTK_WIDGET(self), "progress-invisible");
         gtk_entry_set_progress_pulse_step(GTK_ENTRY(self), 0.15);
         self->state->loading_pulse_source_id = g_timeout_add_full(
             G_PRIORITY_DEFAULT,
@@ -248,6 +250,7 @@ void ladybird_location_entry_set_loading(LadybirdLocationEntry* self, bool is_lo
             self,
             nullptr);
     } else {
+        gtk_widget_add_css_class(GTK_WIDGET(self), "progress-invisible");
         if (self->state->loading_pulse_source_id != 0) {
             g_source_remove(self->state->loading_pulse_source_id);
             self->state->loading_pulse_source_id = 0;

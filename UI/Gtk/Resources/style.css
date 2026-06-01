@@ -17,3 +17,11 @@
     border: 1px solid color-mix(in srgb, var(--border-color) 80%, transparent);
     backdrop-filter: blur(8px);
 }
+
+.ladybird-location-entry progress {
+    transition: opacity 200ms var(--ease-out-quad);
+}
+
+.ladybird-location-entry.progress-invisible progress {
+    opacity: 0;
+}
