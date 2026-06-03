@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <AK/AtomicRefCounted.h>
 #include <AK/Badge.h>
 #include <AK/ByteString.h>
 #include <AK/DistinctNumeric.h>
@@ -21,6 +22,8 @@
 #include <AK/UFixedBigInt.h>
 #include <AK/Variant.h>
 #include <AK/WeakPtr.h>
+#include <LibSync/ConditionVariable.h>
+#include <LibSync/Mutex.h>
 #include <LibWasm/Constants.h>
 #include <LibWasm/Export.h>
 #include <LibWasm/Forward.h>
@@ -868,6 +871,13 @@ private:
 
 void free_cranelift_code(void* handle);
 
+struct CraneliftTrap {
+    u32 offset { 0 };
+    u8 code { 0 };
+    u8 _padding[3] { 0, 0, 0 };
+};
+static_assert(sizeof(CraneliftTrap) == 8);
+
 struct CompiledInstructions {
     Vector<Dispatch> dispatches;
     Vector<SourcesAndDestination> src_dst_mappings;
@@ -876,6 +886,8 @@ struct CompiledInstructions {
     bool cranelift_compiled = false;
     void* cranelift_code_handle = nullptr; // Owned; freed when the owning Module is destroyed.
     size_t cranelift_code_size = 0;
+    CraneliftTrap const* cranelift_traps = nullptr; // Owned by cranelift_code_handle.
+    size_t cranelift_trap_count = 0;
     size_t max_call_arg_count = 0;
     size_t max_call_rec_size = 0;
 };
@@ -1467,7 +1479,12 @@ private:
     Vector<TagType> m_tags;
 };
 
-class WASM_API Module : public RefCounted<Module>
+enum class CompileToNative : u8 {
+    No,
+    Yes,
+};
+
+class WASM_API Module : public AtomicRefCounted<Module>
     , public Weakable<Module> {
 public:
     enum class ValidationStatus {
@@ -1514,6 +1531,34 @@ public:
     ValidationStatus validation_status() const { return m_validation_status; }
     StringView validation_error() const LIFETIME_BOUND { return *m_validation_error; }
     void set_validation_error(ByteString error) { m_validation_error = move(error); }
+    bool has_attempted_cranelift_compilation() const { return m_cranelift_compilation_state.load(AK::MemoryOrder::memory_order_acquire) == 2; }
+    void set_has_attempted_cranelift_compilation(bool value) const
+    {
+        Sync::MutexLocker locker(m_cranelift_compilation_mutex);
+        m_cranelift_compilation_state.store(value ? 2 : 0, AK::MemoryOrder::memory_order_release);
+        m_cranelift_compilation_state_changed.broadcast();
+    }
+    bool try_begin_cranelift_compilation() const
+    {
+        u8 not_started = 0;
+        return m_cranelift_compilation_state.compare_exchange_strong(not_started, 1, AK::MemoryOrder::memory_order_acq_rel);
+    }
+    void finish_cranelift_compilation() const
+    {
+        Sync::MutexLocker locker(m_cranelift_compilation_mutex);
+        m_cranelift_compilation_state.store(2, AK::MemoryOrder::memory_order_release);
+        m_cranelift_compilation_state_changed.broadcast();
+    }
+    void wait_for_cranelift_compilation() const
+    {
+        if (m_cranelift_compilation_state.load(AK::MemoryOrder::memory_order_acquire) != 1)
+            return;
+
+        Sync::MutexLocker locker(m_cranelift_compilation_mutex);
+        m_cranelift_compilation_state_changed.wait_while([this] {
+            return m_cranelift_compilation_state.load(AK::MemoryOrder::memory_order_acquire) == 1;
+        });
+    }
 
     static ParseResult<NonnullRefPtr<Module>> parse(Stream& stream);
 
@@ -1541,13 +1586,19 @@ private:
 
     ValidationStatus m_validation_status { ValidationStatus::Unchecked };
     Optional<ByteString> m_validation_error;
+    mutable Atomic<u8> m_cranelift_compilation_state { 0 };
+    mutable Sync::Mutex m_cranelift_compilation_mutex;
+    mutable Sync::ConditionVariable m_cranelift_compilation_state_changed { m_cranelift_compilation_mutex };
 
     size_t m_minimum_call_record_allocation_size { 0 };
 };
 
 CompiledInstructions try_compile_instructions(Expression const&, Span<FunctionType const> functions);
+ErrorOr<void, ValidationError> ensure_cranelift_compiled(Module&);
+WASM_API void start_cranelift_compilation(Module&);
 bool try_cranelift_compile(CompiledInstructions& compiled, u32 result_arity = 0);
 void flush_cranelift_batch();
+void discard_cranelift_batch();
 
 // Caller-supplied hooks for the Cranelift on-disk cache.
 //   - `wasm_hash` is a 32-byte digest of the wasm bytes; embedded in produced blobs
