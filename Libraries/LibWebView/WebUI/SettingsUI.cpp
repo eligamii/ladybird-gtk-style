@@ -39,6 +39,8 @@ static bool should_show_config_variable([[maybe_unused]] ConfigVariableID id)
     if (id == ConfigVariableID::UseRoundedWindowCorners)
         return false;
 #endif
+    if (id == ConfigVariableID::UseServerSideWindowDecorations)
+        return Application::the().supports_server_side_window_decorations();
 
     return true;
 }
@@ -174,9 +176,11 @@ void SettingsUI::set_tab_settings(JsonValue const& tab_settings)
 {
     auto& settings = WebView::Application::settings();
     auto parsed_tab_settings = Settings::parse_tab_settings(tab_settings);
+    auto const& current_tab_settings = settings.tab_settings();
 
-    // Collapsed/expanded vertical tabs are not controlled by the settings UI. Don't overwrite it.
-    parsed_tab_settings.vertical_tabs_expanded = settings.tab_settings().vertical_tabs_expanded;
+    // Collapsed/expanded vertical tabs and their width are not controlled by the settings UI. Don't overwrite them.
+    parsed_tab_settings.vertical_tabs_expanded = current_tab_settings.vertical_tabs_expanded;
+    parsed_tab_settings.vertical_tabs_expanded_width = current_tab_settings.vertical_tabs_expanded_width;
 
     settings.set_tab_settings(parsed_tab_settings);
     load_current_settings();

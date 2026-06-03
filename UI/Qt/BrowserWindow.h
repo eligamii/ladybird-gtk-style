@@ -106,6 +106,7 @@ public:
     FullscreenMode& fullscreen_mode();
 
     QMenu& hamburger_menu() const { return *m_hamburger_menu; }
+    static bool uses_client_side_decorations();
 
     QAction& new_window_action() const { return *m_new_window_action; }
     QAction& find_action() const { return *m_find_in_page_action; }
@@ -113,7 +114,6 @@ public:
     void update_tabs_display();
 
     void rebuild_bookmarks_menu();
-    void update_bookmarks_bar_display(bool show_bookmarks_bar);
     void update_reopen_recently_closed_action();
     void detach_tab_to_new_window(int index, QPoint global_position);
     void move_tab_to_window(int index, BrowserWindow& target_window, int target_index);
@@ -155,6 +155,9 @@ private:
     virtual void moveEvent(QMoveEvent*) override;
     virtual void wheelEvent(QWheelEvent*) override;
     virtual void closeEvent(QCloseEvent*) override;
+
+    virtual void show_menu_bar_changed() override;
+    virtual void show_bookmarks_bar_changed() override;
     virtual void config_variable_changed(WebView::ConfigVariableID) override;
 
     Tab& create_new_tab(Web::HTML::ActivateTab, Tab& parent, Optional<u64> page_index);
@@ -179,8 +182,9 @@ private:
     void create_menu_bar_window_controls();
     void update_tab_button_icons();
     void update_menu_bar_style();
-    void update_menu_bar_visibility(bool);
+    void update_menu_bar_visibility();
     void update_menu_bar_window_control_icons();
+    void update_window_decoration_state();
     void toggle_window_maximized();
     bool start_window_move();
     bool connect_window_screen_changed_signal();
