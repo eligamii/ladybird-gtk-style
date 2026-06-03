@@ -30,6 +30,7 @@ class QPaintEvent;
 class QPixmap;
 class QResizeEvent;
 class QToolButton;
+class QTimer;
 class QVariantAnimation;
 class QWheelEvent;
 
@@ -55,6 +56,7 @@ public:
     TabLayout tab_layout() const { return m_tab_layout; }
     void set_tab_layout(TabLayout);
     void refresh_tab_layout();
+    void recreate_icons();
 
 private:
     virtual QSize sizeHint() const override;
@@ -70,6 +72,7 @@ private:
     virtual void dragLeaveEvent(QDragLeaveEvent*) override;
     virtual void dragMoveEvent(QDragMoveEvent*) override;
     virtual void dropEvent(QDropEvent*) override;
+    virtual bool eventFilter(QObject*, QEvent*) override;
     virtual void leaveEvent(QEvent*) override;
     virtual void mouseDoubleClickEvent(QMouseEvent*) override;
     virtual void mousePressEvent(QMouseEvent*) override;
@@ -92,6 +95,7 @@ private:
     int max_vertical_scroll_offset() const;
     void set_vertical_scroll_offset(int);
 
+    void set_hovered_tab_index(int);
     void ensure_tab_visible(int index);
     void update_tab_button_geometry();
 
@@ -105,6 +109,7 @@ private:
     qreal m_hover_progress { 0.0 };
     int m_drop_indicator_index { -1 };
     QVariantAnimation* m_hover_animation { nullptr };
+    QIcon m_fallback_tab_icon;
     QPointer<Tab> m_pressed_tab;
     QPoint m_position_in_selected_tab_while_dragging;
     QPoint m_drag_start_position;
@@ -145,6 +150,7 @@ public:
     void update_window_button_icons();
     void set_vertical_tabs_enabled(bool);
     void set_vertical_tabs_expanded(bool);
+    void set_vertical_tabs_expand_on_hover(bool);
     void update_tab_button_visibility();
 
 signals:
@@ -162,20 +168,37 @@ protected:
 private:
     TabLayout current_tab_layout() const;
     QWidget* tab_drag_area_widget() const;
+    bool vertical_tabs_effectively_expanded() const;
+    bool can_expand_vertical_tabs_on_hover() const;
+    bool cursor_is_over_vertical_tabs() const;
+    int vertical_tabs_layout_width() const;
+    bool should_show_window_controls_in_tab_toolbar() const;
 
     void rebuild_layout();
     void rebuild_layout_for_horizontal_tabs();
     void rebuild_layout_for_vertical_tabs();
+    void rebuild_page_column();
+    void update_toolbar_placement();
+    void update_tab_toolbar_window_controls_visibility();
     int current_vertical_tabs_width() const;
     void apply_vertical_tabs_expanded_width(int width);
     void persist_vertical_tabs_expanded_width();
     void update_vertical_tabs_resize_handle();
+    void update_vertical_tabs_content_separator();
     void set_resize_handle_property(char const* property, bool enabled);
     void update_vertical_tabs_action_labels();
+    void update_vertical_tabs_hover_layout();
+    QRect vertical_tabs_chrome_rect() const;
+    int vertical_tabs_tab_width() const;
+    void update_vertical_tabs_button_layout();
     void update_tab_layout();
     void update_tab_chrome_visibility();
     void recreate_icons();
     void update_chrome_style();
+    void update_vertical_tabs_overlay_geometry();
+    void set_vertical_tabs_hover_expanded(bool);
+    void defer_update_vertical_tabs_hover_expanded();
+    void update_vertical_tabs_hover_expanded();
     void toggle_window_maximized();
     bool start_window_move();
     void accept_tab_drag(QDragMoveEvent*);
@@ -187,19 +210,27 @@ private:
     QToolButton* m_minimize_window_button { nullptr };
     QToolButton* m_maximize_window_button { nullptr };
     QToolButton* m_close_window_button { nullptr };
+    QWidget* m_window_controls { nullptr };
+    QStackedWidget* m_toolbar_container { nullptr };
+    QWidget* m_page_column { nullptr };
     QWidget* m_tab_bar_row { nullptr };
-    QWidget* m_vertical_tabs_new_tab_separator { nullptr };
+    QWidget* m_vertical_tabs_reserved_space { nullptr };
     QWidget* m_vertical_tab_bar_column { nullptr };
+    QWidget* m_vertical_tabs_content_separator { nullptr };
     QWidget* m_vertical_tabs_resize_handle { nullptr };
     QWidget* m_vertical_tabs_content { nullptr };
+    QTimer* m_vertical_tabs_hover_collapse_timer { nullptr };
     QBoxLayout* m_main_layout { nullptr };
     QBoxLayout* m_tab_bar_row_layout { nullptr };
+    QBoxLayout* m_page_column_layout { nullptr };
     QBoxLayout* m_vertical_tab_bar_column_layout { nullptr };
     QBoxLayout* m_vertical_tabs_content_layout { nullptr };
     bool m_tab_bar_visible { true };
     bool m_window_controls_visible { true };
     bool m_vertical_tabs_enabled { false };
     bool m_vertical_tabs_expanded { true };
+    bool m_vertical_tabs_expand_on_hover { false };
+    bool m_vertical_tabs_hover_expanded { false };
     bool m_is_resizing_vertical_tabs { false };
     bool m_is_updating_chrome_style { false };
     int m_vertical_tabs_expanded_width { 0 };
@@ -212,6 +243,7 @@ class TabBarButton final : public QPushButton {
 
 public:
     explicit TabBarButton(QIcon const& icon, QWidget* parent = nullptr);
+    void set_collapsed_vertical_overlay(bool);
 
 protected:
     virtual bool event(QEvent* event) override;

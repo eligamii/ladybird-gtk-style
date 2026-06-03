@@ -124,9 +124,9 @@ enum class InvalidateLayoutTreeReason {
     X(HTMLInputElementWidth)                 \
     X(HTMLLabelElementActivationBehavior)    \
     X(HostedDocumentBeforePaint)             \
+    X(InspectAccessibilityTree)              \
     X(InspectDOMTree)                        \
-    X(InspectFlexboxLayout)                  \
-    X(InspectGridLayout)                     \
+    X(InspectDevToolsLayoutData)             \
     X(InternalsHitTest)                      \
     X(MediaQueryListMatches)                 \
     X(NavigableSelectedText)                 \
@@ -399,6 +399,7 @@ public:
     void update_layout(UpdateLayoutReason);
     void update_layout_if_needed_for_node(Node const&, UpdateLayoutReason);
     [[nodiscard]] bool layout_is_up_to_date() const;
+    void clear_devtools_layout_inspection_data();
     void update_paint_and_hit_testing_properties_if_needed();
     void update_animated_style_if_needed();
 
@@ -963,6 +964,7 @@ public:
 
     InputEventsTarget* active_input_events_target(DOM::Node const* for_node = nullptr);
     GC::Ptr<DOM::Position> cursor_position() const;
+    void set_cursor_position_needs_repaint();
 
     bool cursor_blink_state() const { return m_cursor_blink_state; }
 

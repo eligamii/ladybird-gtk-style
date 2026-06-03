@@ -5,6 +5,7 @@
  */
 
 #include <AK/JsonArray.h>
+#include <AK/Platform.h>
 #include <LibURL/Parser.h>
 #include <LibWebView/Application.h>
 #include <LibWebView/SearchEngine.h>
@@ -30,6 +31,16 @@ static StringView config_variable_type_to_string(JsonValue::Type type)
     }
 
     VERIFY_NOT_REACHED();
+}
+
+static bool should_show_config_variable([[maybe_unused]] ConfigVariableID id)
+{
+#if !defined(AK_OS_MACOS)
+    if (id == ConfigVariableID::UseRoundedWindowCorners)
+        return false;
+#endif
+
+    return true;
 }
 
 void SettingsUI::register_interfaces()
@@ -127,6 +138,9 @@ void SettingsUI::load_current_settings()
 
     JsonArray config_variables;
     for (auto const& variable : config_variable_definitions()) {
+        if (!should_show_config_variable(variable.id))
+            continue;
+
         JsonObject variable_object;
         variable_object.set("name"sv, variable.name);
         variable_object.set("title"sv, variable.title);
@@ -158,9 +172,13 @@ void SettingsUI::set_new_tab_page_url(JsonValue const& new_tab_page_url)
 
 void SettingsUI::set_tab_settings(JsonValue const& tab_settings)
 {
+    auto& settings = WebView::Application::settings();
     auto parsed_tab_settings = Settings::parse_tab_settings(tab_settings);
-    WebView::Application::settings().set_tab_settings(parsed_tab_settings);
 
+    // Collapsed/expanded vertical tabs are not controlled by the settings UI. Don't overwrite it.
+    parsed_tab_settings.vertical_tabs_expanded = settings.tab_settings().vertical_tabs_expanded;
+
+    settings.set_tab_settings(parsed_tab_settings);
     load_current_settings();
 }
 

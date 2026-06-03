@@ -28,6 +28,7 @@
 #include <LibWeb/HTML/BrowsingContext.h>
 #include <LibWeb/HTML/EventLoop/EventLoop.h>
 #include <LibWeb/HTML/HTMLLinkElement.h>
+#include <LibWeb/HTML/Navigable.h>
 #include <LibWeb/HTML/Scripting/ClassicScript.h>
 #include <LibWeb/HTML/TraversableNavigable.h>
 #include <LibWeb/HighResolutionTime/TimeOrigin.h>
@@ -124,7 +125,16 @@ ConnectionFromClient& PageClient::client() const
 
 void PageClient::set_has_focus(bool has_focus)
 {
+    if (m_has_focus == has_focus)
+        return;
+
     m_has_focus = has_focus;
+
+    if (auto document = page().top_level_traversable()->active_document()) {
+        if (has_focus)
+            document->reset_cursor_blink_cycle();
+        document->set_cursor_position_needs_repaint();
+    }
 }
 
 void PageClient::setup_palette()
@@ -935,13 +945,34 @@ void PageClient::page_did_receive_network_response_body(u64 request_id, Readonly
 
 void PageClient::did_connect_devtools_client()
 {
+    auto was_first_devtools_client = !has_devtools_client();
     ++m_devtools_client_count;
+
+    if (!was_first_devtools_client)
+        return;
+
+    for (auto& navigable : Web::HTML::all_navigables()) {
+        if (&navigable->page() != &page())
+            continue;
+        if (auto active_document = navigable->active_document())
+            active_document->update_layout(Web::DOM::UpdateLayoutReason::InspectDevToolsLayoutData);
+    }
 }
 
 void PageClient::did_disconnect_devtools_client()
 {
     VERIFY(m_devtools_client_count > 0);
     --m_devtools_client_count;
+
+    if (has_devtools_client())
+        return;
+
+    for (auto& navigable : Web::HTML::all_navigables()) {
+        if (&navigable->page() != &page())
+            continue;
+        if (auto active_document = navigable->active_document())
+            active_document->clear_devtools_layout_inspection_data();
+    }
 }
 
 void PageClient::page_did_finish_network_request(u64 request_id, u64 body_size, Requests::RequestTimingInfo const& timing_info, Optional<Requests::NetworkError> const& network_error)

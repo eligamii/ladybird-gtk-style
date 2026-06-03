@@ -11,6 +11,7 @@
 #include <LibWeb/HTML/ActivateTab.h>
 #include <LibWeb/HTML/AudioPlayState.h>
 #include <LibWebView/Forward.h>
+#include <LibWebView/Settings.h>
 #include <UI/Qt/Tab.h>
 #include <UI/Qt/TabBar.h>
 
@@ -29,6 +30,7 @@ namespace Ladybird {
 class Tab;
 class WebContentView;
 class BrowserWindow;
+class DevToolsBanner;
 
 class ExitFullscreenButton : public QPushButton {
     Q_OBJECT
@@ -80,7 +82,9 @@ private:
     bool m_debounce { false };
 };
 
-class BrowserWindow : public QMainWindow {
+class BrowserWindow
+    : public QMainWindow
+    , public WebView::SettingsObserver {
     Q_OBJECT
 
 public:
@@ -151,6 +155,7 @@ private:
     virtual void moveEvent(QMoveEvent*) override;
     virtual void wheelEvent(QWheelEvent*) override;
     virtual void closeEvent(QCloseEvent*) override;
+    virtual void config_variable_changed(WebView::ConfigVariableID) override;
 
     Tab& create_new_tab(Web::HTML::ActivateTab, Tab& parent, Optional<u64> page_index);
     void initialize_tab(Tab*);
@@ -161,6 +166,7 @@ private:
     Optional<Qt::CursorShape> resize_cursor_for_edges(Qt::Edges) const;
     void update_resize_cursor(QPoint const&);
     void clear_resize_cursor();
+    void update_window_corners();
 
     template<typename Callback>
     void for_each_tab(Callback&& callback)
@@ -171,7 +177,7 @@ private:
 
     void initialize_tab_buttons(Tab*);
     void create_menu_bar_window_controls();
-    void update_tab_close_button_icons();
+    void update_tab_button_icons();
     void update_menu_bar_style();
     void update_menu_bar_visibility(bool);
     void update_menu_bar_window_control_icons();
@@ -195,6 +201,7 @@ private:
 
     TabWidget* m_tabs_container { nullptr };
     Tab* m_current_tab { nullptr };
+    DevToolsBanner* m_devtools_banner { nullptr };
 
     QMenu* m_hamburger_menu { nullptr };
     QMenu* m_bookmarks_menu { nullptr };
