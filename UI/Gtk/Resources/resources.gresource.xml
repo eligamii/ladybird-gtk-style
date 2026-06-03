@@ -1,5 +1,17 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <gresources>
+  <!--
+    Any symbolic icon not in https://specifications.freedesktop.org/icon-naming/latest/#names
+    should be included here
+  -->
+  <gresource prefix="/org/ladybird/Ladybird/gtk/icons/scalable/actions">
+    <file preprocess="xml-stripblanks" alias="content-loading-symbolic.svg">Icons/content-loading-symbolic.svg</file>
+    <file preprocess="xml-stripblanks" alias="globe-alt2-symbolic.svg">Icons/globe-alt2-symbolic.svg</file>
+    <file preprocess="xml-stripblanks" alias="view-grid-symbolic.svg">Icons/view-grid-symbolic.svg</file>
+    <file preprocess="xml-stripblanks" alias="history-undo-symbolic.svg">Icons/history-undo-symbolic.svg</file>
+    <file preprocess="xml-stripblanks" alias="loupe-large-symbolic.svg">Icons/loupe-large-symbolic.svg</file>
+  </gresource>
+
   <gresource prefix="/org/ladybird/Ladybird/gtk">
     <file preprocess="xml-stripblanks">browser-window.ui</file>
     <file preprocess="xml-stripblanks">list-popover.ui</file>

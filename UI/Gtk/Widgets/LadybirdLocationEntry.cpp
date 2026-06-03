@@ -97,15 +97,15 @@ static void ladybird_location_entry_init(LadybirdLocationEntry* self)
 {
     self->state = adopt_own(*new LocationEntryState {
         .autocomplete = make<WebView::Autocomplete>(),
-        .suggestions = {},
-        .favicon = {},
+        .suggestions = { },
+        .favicon = { },
         .selected_index = -1,
-        .user_text = {},
+        .user_text = { },
         .is_focused = false,
         .is_loading = false,
         .updating_text = false,
         .loading_pulse_source_id = 0,
-        .on_navigate = {},
+        .on_navigate = { },
     });
 
     gtk_widget_set_hexpand(GTK_WIDGET(self), TRUE);
@@ -125,11 +125,11 @@ static void ladybird_location_entry_init(LadybirdLocationEntry* self)
     gtk_widget_set_parent(GTK_WIDGET(self->popover), GTK_WIDGET(self));
 
     gtk_list_box_set_header_func(self->list_box, [](GtkListBoxRow* row, GtkListBoxRow* before, gpointer) {
-        const char* row_title = static_cast<const char*>(g_object_get_data(G_OBJECT(row), "section-name"));
-        const char* before_title = nullptr;
+        char const* row_title = static_cast<char const*>(g_object_get_data(G_OBJECT(row), "section-name"));
+        char const* before_title = nullptr;
 
         if (before) {
-            before_title = static_cast<const char*>(g_object_get_data(G_OBJECT(before), "section-name"));
+            before_title = static_cast<char const*>(g_object_get_data(G_OBJECT(before), "section-name"));
         }
 
         if (row_title != before_title && row_title) {
@@ -144,8 +144,8 @@ static void ladybird_location_entry_init(LadybirdLocationEntry* self)
             gtk_widget_add_css_class(label, "dimmed");
             gtk_list_box_row_set_header(row, label);
         }
-
-    }, nullptr, nullptr);
+    },
+        nullptr, nullptr);
 
     // Clicking a suggestion navigates to it
     g_signal_connect_swapped(self->list_box, "row-activated", G_CALLBACK(+[](LadybirdLocationEntry* self, GtkListBoxRow* row) {
@@ -307,7 +307,7 @@ static void ladybird_location_entry_update_leading_icon(LadybirdLocationEntry* s
         return;
     }
 
-    gtk_entry_set_icon_from_icon_name(GTK_ENTRY(self), GTK_ENTRY_ICON_PRIMARY, "web-browser-symbolic");
+    gtk_entry_set_icon_from_icon_name(GTK_ENTRY(self), GTK_ENTRY_ICON_PRIMARY, "globe-alt2-symbolic");
     gtk_entry_set_icon_tooltip_text(GTK_ENTRY(self), GTK_ENTRY_ICON_PRIMARY, nullptr);
 }
 
@@ -373,7 +373,7 @@ static void ladybird_location_entry_navigate(LadybirdLocationEntry* self)
     }
 }
 
-static const char* completion_section_to_string(WebView::AutocompleteSuggestionSection section)
+static char const* completion_section_to_string(WebView::AutocompleteSuggestionSection section)
 {
     switch (section) {
     case WebView::AutocompleteSuggestionSection::History:
@@ -387,18 +387,17 @@ static const char* completion_section_to_string(WebView::AutocompleteSuggestionS
     }
 }
 
-static const char* icon_name_from_completion_source(WebView::AutocompleteSuggestionSource source)
+static char const* icon_name_from_completion_source(WebView::AutocompleteSuggestionSource source)
 {
-    // TODO: Replace with proper embedded symbolic icons
     switch (source) {
     case WebView::AutocompleteSuggestionSource::Search:
-        return "system-search-symbolic";
+        return "loupe-large-symbolic";
 
     case WebView::AutocompleteSuggestionSource::History:
-        return "document-open-recent-symbolic";
+        return "history-undo-symbolic";
 
     default:
-        return "web-browser-symbolic";
+        return "globe-alt2-symbolic";
     }
 }
 
@@ -451,12 +450,13 @@ static void ladybird_location_entry_show_completions(LadybirdLocationEntry* self
             gtk_image_set_from_icon_name(GTK_IMAGE(icon), icon_name_from_completion_source(suggestion.source));
         }
 
-        const char* title_text = suggestion.title
-            .value_or(suggestion.text)
-            .to_byte_string().characters();
+        char const* title_text = suggestion.title
+                                     .value_or(suggestion.text)
+                                     .to_byte_string()
+                                     .characters();
         gtk_label_set_label(GTK_LABEL(title), title_text);
 
-        const char* subtitle_text = nullptr;
+        char const* subtitle_text = nullptr;
         if (suggestion.subtitle.has_value())
             subtitle_text = suggestion.subtitle.value().to_byte_string().characters();
         else if (suggestion.title.has_value())
