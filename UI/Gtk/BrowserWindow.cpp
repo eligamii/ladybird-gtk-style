@@ -277,14 +277,7 @@ void BrowserWindow::on_tab_switched()
     if (!tab)
         return;
 
-    auto const& url = tab->view().url();
-    if (is_internal_url(url)) {
-        ladybird_location_entry_set_text(m_location_entry, "");
-    } else {
-        auto url_str = url.serialize().to_byte_string();
-        ladybird_location_entry_set_url(m_location_entry, url_str.characters());
-    }
-
+    update_location_entry(tab->view().url());
     bind_navigation_actions(tab->view());
     update_location_favicon(tab->favicon());
     update_location_loading(tab->is_loading());
@@ -425,14 +418,19 @@ void BrowserWindow::bind_navigation_actions(WebContentView& view)
     bind(m_forward_binding, view.navigate_forward_action(), "go-forward");
 }
 
-void BrowserWindow::update_location_entry(StringView url)
+void BrowserWindow::update_location_entry(URL::URL const& url)
 {
-    if (url.is_empty()) {
+    if (is_internal_url(url)) {
+        ladybird_location_entry_set_url(m_location_entry, "");
+        return;
+    }
+    auto url_string = url.serialize().to_byte_string();
+
+    if (url_string.is_empty()) {
         ladybird_location_entry_set_text(m_location_entry, "");
         return;
     }
-    auto byte_url = ByteString(url);
-    ladybird_location_entry_set_url(m_location_entry, byte_url.characters());
+    ladybird_location_entry_set_url(m_location_entry, url_string.characters());
 }
 
 void BrowserWindow::update_location_favicon(GdkPaintable* favicon)

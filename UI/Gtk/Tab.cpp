@@ -105,17 +105,11 @@ void Tab::setup_callbacks()
     };
 
     m_view->on_url_change = [this](auto const& url) {
-        if (m_window.current_tab() != this)
-            return;
-        if (BrowserWindow::is_internal_url(url)) {
-            m_window.update_location_entry(""sv);
-            return;
-        }
-        auto url_string = url.serialize();
-        m_window.update_location_entry(url_string.bytes_as_string_view());
+        if (m_window.current_tab() == this)
+            m_window.update_location_entry(url);
     };
 
-    m_view->on_load_start = [this](auto const&, bool) {
+    m_view->on_load_start = [this](auto const& url, bool) {
         m_is_loading = true;
         m_favicon.clear();
         if (m_tab_page)
@@ -124,6 +118,9 @@ void Tab::setup_callbacks()
             m_window.update_location_favicon(nullptr);
             m_window.update_location_loading(true);
         }
+
+        if (m_window.current_tab() == this)
+            m_window.update_location_entry(url);
     };
 
     m_view->on_load_finish = [this](auto const&) {
