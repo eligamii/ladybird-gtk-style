@@ -304,7 +304,7 @@ static void ladybird_location_entry_update_leading_icon(LadybirdLocationEntry* s
         return;
     }
 
-    gtk_entry_set_icon_from_icon_name(GTK_ENTRY(self), GTK_ENTRY_ICON_PRIMARY, nullptr);
+    gtk_entry_set_icon_from_icon_name(GTK_ENTRY(self), GTK_ENTRY_ICON_PRIMARY, "web-browser-symbolic");
     gtk_entry_set_icon_tooltip_text(GTK_ENTRY(self), GTK_ENTRY_ICON_PRIMARY, nullptr);
 }
 
