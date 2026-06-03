@@ -25,3 +25,25 @@
 .ladybird-location-entry.progress-invisible progress {
     opacity: 0;
 }
+
+.ladybird-location-entry-completion-popover {
+    margin-top: 4px;
+}
+
+.ladybird-location-entry-completion-popover row:selected {
+    background-color: color-mix(in srgb, currentColor 10%, transparent);
+}
+
+.ladybird-location-entry-completion-popover row:hover {
+    background-color: color-mix(in srgb, currentColor 5%, transparent);
+}
+
+.ladybird-location-entry-completion-popover-header {
+    font-weight: bold;
+    margin: 4px 16px;
+}
+
+.ladybird-location-entry-completion-popover-header.first {
+    margin: 16px 16px 4px 16px;
+}
+

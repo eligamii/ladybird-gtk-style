@@ -81,10 +81,16 @@ static void ladybird_location_entry_finalize(GObject* object)
     G_OBJECT_CLASS(ladybird_location_entry_parent_class)->finalize(object);
 }
 
+static void ladybird_location_entry_size_allocate(GtkWidget* widget, int width, int height, int baseline)
+{
+    GTK_WIDGET_CLASS(ladybird_location_entry_parent_class)->size_allocate(widget, width, height, baseline);
+    gtk_popover_present(LADYBIRD_LOCATION_ENTRY(widget)->popover);
+}
+
 static void ladybird_location_entry_class_init(LadybirdLocationEntryClass* klass)
 {
-    auto* object_class = G_OBJECT_CLASS(klass);
-    object_class->finalize = ladybird_location_entry_finalize;
+    G_OBJECT_CLASS(klass)->finalize = ladybird_location_entry_finalize;
+    GTK_WIDGET_CLASS(klass)->size_allocate = ladybird_location_entry_size_allocate;
 }
 
 static void ladybird_location_entry_init(LadybirdLocationEntry* self)
@@ -117,6 +123,29 @@ static void ladybird_location_entry_init(LadybirdLocationEntry* self)
     self->popover = LadybirdWidgets::get_builder_object<GtkPopover>(builder, "completion_popover");
     self->list_box = LadybirdWidgets::get_builder_object<GtkListBox>(builder, "completion_list_box");
     gtk_widget_set_parent(GTK_WIDGET(self->popover), GTK_WIDGET(self));
+
+    gtk_list_box_set_header_func(self->list_box, [](GtkListBoxRow* row, GtkListBoxRow* before, gpointer) {
+        const char* row_title = static_cast<const char*>(g_object_get_data(G_OBJECT(row), "section-name"));
+        const char* before_title = nullptr;
+
+        if (before) {
+            before_title = static_cast<const char*>(g_object_get_data(G_OBJECT(before), "section-name"));
+        }
+
+        if (row_title != before_title && row_title) {
+            GtkWidget* label = gtk_label_new(row_title);
+
+            if (before)
+                gtk_widget_add_css_class(label, "first");
+
+            gtk_widget_set_halign(label, GTK_ALIGN_START);
+            gtk_label_set_xalign(GTK_LABEL(label), 0.0);
+            gtk_widget_add_css_class(label, "ladybird-location-entry-completion-popover-header");
+            gtk_widget_add_css_class(label, "dimmed");
+            gtk_list_box_row_set_header(row, label);
+        }
+
+    }, nullptr, nullptr);
 
     // Clicking a suggestion navigates to it
     g_signal_connect_swapped(self->list_box, "row-activated", G_CALLBACK(+[](LadybirdLocationEntry* self, GtkListBoxRow* row) {
@@ -275,7 +304,7 @@ static void ladybird_location_entry_update_leading_icon(LadybirdLocationEntry* s
         return;
     }
 
-    gtk_entry_set_icon_from_icon_name(GTK_ENTRY(self), GTK_ENTRY_ICON_PRIMARY, nullptr);
+    gtk_entry_set_icon_from_icon_name(GTK_ENTRY(self), GTK_ENTRY_ICON_PRIMARY, "web-browser-symbolic");
     gtk_entry_set_icon_tooltip_text(GTK_ENTRY(self), GTK_ENTRY_ICON_PRIMARY, nullptr);
 }
 
@@ -341,6 +370,35 @@ static void ladybird_location_entry_navigate(LadybirdLocationEntry* self)
     }
 }
 
+static const char* completion_section_to_string(WebView::AutocompleteSuggestionSection section)
+{
+    switch (section) {
+    case WebView::AutocompleteSuggestionSection::History:
+        return "History";
+
+    case WebView::AutocompleteSuggestionSection::SearchSuggestions:
+        return "Search suggestions";
+
+    default:
+        return nullptr;
+    }
+}
+
+static const char* icon_name_from_completion_source(WebView::AutocompleteSuggestionSource source)
+{
+    // TODO: Replace with proper embedded symbolic icons
+    switch (source) {
+    case WebView::AutocompleteSuggestionSource::Search:
+        return "system-search-symbolic";
+
+    case WebView::AutocompleteSuggestionSource::History:
+        return "document-open-recent-symbolic";
+
+    default:
+        return "web-browser-symbolic";
+    }
+}
+
 static void ladybird_location_entry_show_completions(LadybirdLocationEntry* self)
 {
     GtkWidget* child;
@@ -348,22 +406,78 @@ static void ladybird_location_entry_show_completions(LadybirdLocationEntry* self
         gtk_list_box_remove(self->list_box, child);
 
     for (auto const& suggestion : self->state->suggestions) {
-        auto byte_str = suggestion.text.to_byte_string();
-        auto* label = gtk_label_new(byte_str.characters());
-        gtk_label_set_xalign(GTK_LABEL(label), 0.0);
-        gtk_label_set_ellipsize(GTK_LABEL(label), PANGO_ELLIPSIZE_END);
-        gtk_widget_set_margin_start(label, 8);
-        gtk_widget_set_margin_end(label, 8);
-        gtk_widget_set_margin_top(label, 4);
-        gtk_widget_set_margin_bottom(label, 4);
-        gtk_list_box_append(self->list_box, label);
+        auto* main_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+
+        // Setup title box
+        auto* title_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+        GtkWidget* icon = gtk_image_new();
+        gtk_widget_set_valign(icon, GTK_ALIGN_START);
+        gtk_box_append(GTK_BOX(title_box), icon);
+
+        auto* title = gtk_label_new(nullptr);
+        gtk_label_set_ellipsize(GTK_LABEL(title), PANGO_ELLIPSIZE_END);
+        gtk_label_set_xalign(GTK_LABEL(title), 0.0);
+        gtk_box_append(GTK_BOX(title_box), title);
+
+        gtk_widget_set_halign(title_box, GTK_ALIGN_FILL);
+        gtk_widget_set_hexpand(title_box, true);
+        gtk_box_append(GTK_BOX(main_box), title_box);
+
+        // Setup subtitle
+        auto* subtitle = gtk_label_new(nullptr);
+        gtk_label_set_ellipsize(GTK_LABEL(subtitle), PANGO_ELLIPSIZE_END);
+        gtk_widget_set_halign(subtitle, GTK_ALIGN_START);
+        gtk_widget_add_css_class(subtitle, "dimmed");
+        gtk_box_append(GTK_BOX(main_box), subtitle);
+
+        bool is_icon_set = false;
+        if (suggestion.favicon_base64_png.has_value()) {
+            gsize size;
+            g_autofree auto* icon_buffer = g_base64_decode(suggestion.favicon_base64_png.value().to_byte_string().characters(), &size);
+
+            if (icon_buffer) {
+                GdkTexture* texture = gdk_texture_new_from_bytes(g_bytes_new(icon_buffer, size), nullptr);
+
+                if (texture) {
+                    is_icon_set = true;
+                    gtk_image_set_from_paintable(GTK_IMAGE(icon), GDK_PAINTABLE(texture));
+                }
+            }
+        }
+        if (!is_icon_set) {
+            gtk_image_set_from_icon_name(GTK_IMAGE(icon), icon_name_from_completion_source(suggestion.source));
+        }
+
+        const char* title_text = suggestion.title
+            .value_or(suggestion.text)
+            .to_byte_string().characters();
+        gtk_label_set_label(GTK_LABEL(title), title_text);
+
+        const char* subtitle_text = nullptr;
+        if (suggestion.subtitle.has_value())
+            subtitle_text = suggestion.subtitle.value().to_byte_string().characters();
+        else if (suggestion.title.has_value())
+            subtitle_text = suggestion.text.to_byte_string().characters();
+
+        if (subtitle_text) {
+            gtk_label_set_label(GTK_LABEL(subtitle), subtitle_text);
+            gtk_widget_set_visible(GTK_WIDGET(subtitle), true);
+        } else {
+            gtk_widget_set_visible(GTK_WIDGET(subtitle), false);
+        }
+
+        GtkListBoxRow* row = GTK_LIST_BOX_ROW(gtk_list_box_row_new());
+        g_object_set_data(G_OBJECT(row), "section-name", const_cast<char*>(completion_section_to_string(suggestion.section)));
+        gtk_list_box_row_set_child(row, main_box);
+        gtk_list_box_append(self->list_box, GTK_WIDGET(row));
     }
 
     gtk_list_box_unselect_all(self->list_box);
 
-    auto entry_width = gtk_widget_get_width(GTK_WIDGET(self));
-    if (entry_width > 0)
-        gtk_widget_set_size_request(GTK_WIDGET(self->popover), entry_width, -1);
+    graphene_rect_t bounds;
+    gboolean success = gtk_widget_compute_bounds(GTK_WIDGET(self), GTK_WIDGET(self), &bounds);
+    if (bounds.size.width > 0 && success)
+        gtk_widget_set_size_request(GTK_WIDGET(self->popover), static_cast<int>(bounds.size.width), -1);
 
     gtk_popover_popup(self->popover);
 }
@@ -382,10 +496,10 @@ static void ladybird_location_entry_move_selection(LadybirdLocationEntry* self, 
         return;
 
     auto new_index = state.selected_index + delta;
-    if (new_index < -1)
+    if (new_index < 0)
         new_index = static_cast<int>(state.suggestions.size()) - 1;
     if (new_index >= static_cast<int>(state.suggestions.size()))
-        new_index = -1;
+        new_index = 0;
 
     state.selected_index = new_index;
 
