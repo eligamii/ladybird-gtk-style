@@ -8,6 +8,8 @@
     <file preprocess="xml-stripblanks" alias="tab-new-symbolic.svg">Icons/tab-new-symbolic.svg</file>
     <file preprocess="xml-stripblanks" alias="globe-alt2-symbolic.svg">Icons/globe-alt2-symbolic.svg</file>
     <file preprocess="xml-stripblanks" alias="content-loading-symbolic.svg">Icons/content-loading-symbolic.svg</file>
+    <file preprocess="xml-stripblanks" alias="loupe-large-symbolic.svg">Icons/loupe-large-symbolic.svg</file>
+    <file preprocess="xml-stripblanks" alias="history-undo-symbolic.svg">Icons/history-undo-symbolic.svg</file>
   </gresource>
 
   <gresource prefix="/org/ladybird/Ladybird/gtk">

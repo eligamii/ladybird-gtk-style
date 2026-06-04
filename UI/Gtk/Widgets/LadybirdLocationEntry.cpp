@@ -56,6 +56,29 @@ static void ladybird_location_entry_move_selection(LadybirdLocationEntry* self, 
 static void ladybird_location_entry_apply_selected_suggestion(LadybirdLocationEntry* self);
 static void ladybird_location_entry_update_leading_icon(LadybirdLocationEntry* self);
 
+static void ladybird_location_entry_completion_popover_header_func(GtkListBoxRow* row, GtkListBoxRow* before, gpointer)
+{
+    const char* row_title = static_cast<const char*>(g_object_get_data(G_OBJECT(row), "section-name"));
+    const char* before_title = nullptr;
+
+    if (before) {
+        before_title = static_cast<const char*>(g_object_get_data(G_OBJECT(before), "section-name"));
+    }
+
+    if (row_title != before_title && row_title) {
+        GtkWidget* label = gtk_label_new(row_title);
+
+        if (before)
+            gtk_widget_add_css_class(label, "first");
+
+        gtk_widget_set_halign(label, GTK_ALIGN_START);
+        gtk_label_set_xalign(GTK_LABEL(label), 0.0);
+        gtk_widget_add_css_class(label, "ladybird-completion-popover-header");
+        gtk_widget_add_css_class(label, "dimmed");
+        gtk_list_box_row_set_header(row, label);
+    }
+}
+
 static void set_entry_text_suppressed(LadybirdLocationEntry* self, char const* text, bool move_cursor_to_end = false)
 {
     self->state->updating_text = true;
@@ -122,6 +145,9 @@ static void ladybird_location_entry_init(LadybirdLocationEntry* self)
     self->popover = LadybirdWidgets::get_builder_object<GtkPopover>(builder, "completion_popover");
     self->list_box = LadybirdWidgets::get_builder_object<GtkListBox>(builder, "completion_list_box");
     gtk_widget_set_parent(GTK_WIDGET(self->popover), GTK_WIDGET(self));
+
+    // Add headers to suggestions sections
+    gtk_list_box_set_header_func(self->list_box, ladybird_location_entry_completion_popover_header_func, nullptr, nullptr);
 
     // Clicking a suggestion navigates to it
     g_signal_connect_swapped(self->list_box, "row-activated", G_CALLBACK(+[](LadybirdLocationEntry* self, GtkListBoxRow* row) {
@@ -206,6 +232,7 @@ static void ladybird_location_entry_init(LadybirdLocationEntry* self)
         self->state->is_focused = false;
         ladybird_location_entry_hide_completions(self);
         ladybird_location_entry_update_display_attributes(self);
+        gtk_editable_select_region(GTK_EDITABLE(self), 0, 0);
     }),
         self);
     gtk_widget_add_controller(GTK_WIDGET(self), GTK_EVENT_CONTROLLER(focus_controller));
@@ -349,6 +376,103 @@ static void ladybird_location_entry_navigate(LadybirdLocationEntry* self)
     }
 }
 
+static char const* completion_section_to_string(WebView::AutocompleteSuggestionSection section)
+{
+    switch (section) {
+    case WebView::AutocompleteSuggestionSection::History:
+        return "History";
+
+    case WebView::AutocompleteSuggestionSection::SearchSuggestions:
+        return "Search suggestions";
+
+    default:
+        return nullptr;
+    }
+}
+
+static char const* icon_name_from_completion_source(WebView::AutocompleteSuggestionSource source)
+{
+    switch (source) {
+    case WebView::AutocompleteSuggestionSource::Search:
+        return "loupe-large-symbolic";
+
+    case WebView::AutocompleteSuggestionSource::History:
+        return "history-undo-symbolic";
+
+    default:
+        return "globe-alt2-symbolic";
+    }
+}
+
+static GtkWidget* completion_item_new(WebView::AutocompleteSuggestion const& suggestion)
+{
+    auto* main_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+
+        // Setup title box
+        auto* title_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+        GtkWidget* icon = gtk_image_new();
+        gtk_widget_set_valign(icon, GTK_ALIGN_START);
+        gtk_box_append(GTK_BOX(title_box), icon);
+
+        auto* title = gtk_label_new(nullptr);
+        gtk_label_set_ellipsize(GTK_LABEL(title), PANGO_ELLIPSIZE_END);
+        gtk_label_set_xalign(GTK_LABEL(title), 0.0);
+        gtk_box_append(GTK_BOX(title_box), title);
+
+        gtk_widget_set_halign(title_box, GTK_ALIGN_FILL);
+        gtk_widget_set_hexpand(title_box, true);
+        gtk_box_append(GTK_BOX(main_box), title_box);
+
+        // Setup subtitle
+        auto* subtitle = gtk_label_new(nullptr);
+        gtk_label_set_ellipsize(GTK_LABEL(subtitle), PANGO_ELLIPSIZE_END);
+        gtk_widget_set_halign(subtitle, GTK_ALIGN_START);
+        gtk_widget_add_css_class(subtitle, "dimmed");
+        gtk_box_append(GTK_BOX(main_box), subtitle);
+
+        bool is_icon_set = false;
+        if (suggestion.favicon_base64_png.has_value()) {
+            gsize size;
+            g_autofree auto* icon_buffer = g_base64_decode(suggestion.favicon_base64_png.value().to_byte_string().characters(), &size);
+
+            if (icon_buffer) {
+                GdkTexture* texture = gdk_texture_new_from_bytes(g_bytes_new(icon_buffer, size), nullptr);
+
+                if (texture) {
+                    is_icon_set = true;
+                    gtk_image_set_from_paintable(GTK_IMAGE(icon), GDK_PAINTABLE(texture));
+                }
+            }
+        }
+        if (!is_icon_set) {
+            gtk_image_set_from_icon_name(GTK_IMAGE(icon), icon_name_from_completion_source(suggestion.source));
+        }
+
+        const char* title_text = suggestion.title
+            .value_or(suggestion.text)
+            .to_byte_string().characters();
+        gtk_label_set_label(GTK_LABEL(title), title_text);
+
+        const char* subtitle_text = nullptr;
+        if (suggestion.subtitle.has_value())
+            subtitle_text = suggestion.subtitle.value().to_byte_string().characters();
+        else if (suggestion.title.has_value())
+            subtitle_text = suggestion.text.to_byte_string().characters();
+
+        if (subtitle_text) {
+            gtk_label_set_label(GTK_LABEL(subtitle), subtitle_text);
+            gtk_widget_set_visible(GTK_WIDGET(subtitle), true);
+        } else {
+            gtk_widget_set_visible(GTK_WIDGET(subtitle), false);
+        }
+
+        GtkWidget* row = gtk_list_box_row_new();
+        g_object_set_data(G_OBJECT(row), "section-name", const_cast<char*>(completion_section_to_string(suggestion.section)));
+        gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), main_box);
+
+        return row;
+}
+
 static void ladybird_location_entry_show_completions(LadybirdLocationEntry* self)
 {
     GtkWidget* child;
@@ -356,11 +480,7 @@ static void ladybird_location_entry_show_completions(LadybirdLocationEntry* self
         gtk_list_box_remove(self->list_box, child);
 
     for (auto const& suggestion : self->state->suggestions) {
-        auto byte_str = suggestion.text.to_byte_string();
-        auto* label = gtk_label_new(byte_str.characters());
-        gtk_label_set_xalign(GTK_LABEL(label), 0.0);
-        gtk_label_set_ellipsize(GTK_LABEL(label), PANGO_ELLIPSIZE_END);
-        gtk_list_box_append(self->list_box, label);
+        gtk_list_box_append(self->list_box, completion_item_new(suggestion));
     }
 
     gtk_list_box_unselect_all(self->list_box);
