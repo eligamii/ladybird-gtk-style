@@ -132,6 +132,7 @@ static void ladybird_location_entry_init(LadybirdLocationEntry* self)
     });
 
     gtk_widget_set_hexpand(GTK_WIDGET(self), TRUE);
+    gtk_entry_set_icon_activatable(GTK_ENTRY(self), GTK_ENTRY_ICON_PRIMARY, false);
 
     if (auto const& search_engine = WebView::Application::settings().search_engine(); search_engine.has_value()) {
         auto placeholder = ByteString::formatted("Search with {} or enter URL", search_engine->name);
@@ -306,7 +307,7 @@ static void ladybird_location_entry_update_leading_icon(LadybirdLocationEntry* s
 
     if (self->state->favicon.ptr()) {
         gtk_entry_set_icon_from_paintable(GTK_ENTRY(self), GTK_ENTRY_ICON_PRIMARY, self->state->favicon.ptr());
-        gtk_entry_set_icon_tooltip_text(GTK_ENTRY(self), GTK_ENTRY_ICON_PRIMARY, "Page icon");
+        gtk_entry_set_icon_tooltip_text(GTK_ENTRY(self), GTK_ENTRY_ICON_PRIMARY, nullptr);
         return;
     }
 

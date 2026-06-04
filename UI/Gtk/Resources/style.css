@@ -18,6 +18,9 @@
     opacity: 0;
 }
 
+.ladybird-location-entry image.left {
+    opacity: 100%;
+}
 
 .ladybird-completion-popover {
     margin-top: 4px;
