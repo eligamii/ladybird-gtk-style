@@ -349,10 +349,6 @@ static void ladybird_location_entry_show_completions(LadybirdLocationEntry* self
         auto* label = gtk_label_new(byte_str.characters());
         gtk_label_set_xalign(GTK_LABEL(label), 0.0);
         gtk_label_set_ellipsize(GTK_LABEL(label), PANGO_ELLIPSIZE_END);
-        gtk_widget_set_margin_start(label, 8);
-        gtk_widget_set_margin_end(label, 8);
-        gtk_widget_set_margin_top(label, 4);
-        gtk_widget_set_margin_bottom(label, 4);
         gtk_list_box_append(self->list_box, label);
     }
 

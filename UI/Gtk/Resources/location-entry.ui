@@ -7,6 +7,10 @@
     <property name="has-arrow">false</property>
     <property name="position">bottom</property>
     <property name="halign">start</property>
+    <style>
+      <class name="menu"/>
+      <class name="ladybird-completion-popover"/>
+    </style>
       <child>
       <object class="GtkScrolledWindow">
         <property name="hscrollbar-policy">never</property>
