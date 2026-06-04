@@ -4,6 +4,9 @@
 
   <object class="GtkPopover" id="popover">
     <property name="has-arrow">false</property>
+    <style>
+      <class name="menu"/>
+    </style>
     <child>
       <object class="GtkScrolledWindow" id="scrolled_window">
         <property name="hscrollbar-policy">never</property>
@@ -11,9 +14,7 @@
         <property name="max-content-height">300</property>
         <property name="propagate-natural-height">true</property>
         <property name="child">
-          <object class="GtkListBox" id="list_box">
-            <style><class name="boxed-list"/></style>
-          </object>
+          <object class="GtkListBox" id="list_box"/>
         </property>
       </object>
     </child>

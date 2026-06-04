@@ -39,12 +39,14 @@ NonnullOwnPtr<Core::EventLoop> Application::create_platform_event_loop()
         if (g_application_get_is_remote(G_APPLICATION(m_adw_application)))
             forward_urls_to_remote_and_exit();
 
-        // Register icons
-        // NB: This is supposed to be done in GtkApplication::startup signal,
-        // but seems to only work here.
+        // Register icons and CSS stylesheet
         auto* display = gdk_display_get_default();
         auto* icon_theme = gtk_icon_theme_get_for_display(display);
         gtk_icon_theme_add_resource_path(icon_theme, "/org/ladybird/Ladybird/gtk/icons/scalable/actions");
+
+        auto* provider = gtk_css_provider_new();
+        gtk_css_provider_load_from_resource(provider, "/org/ladybird/Ladybird/gtk/style.css");
+        gtk_style_context_add_provider_for_display(gdk_display_get_default(), GTK_STYLE_PROVIDER(provider), GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
 
         setup_dbus_handlers();
     }
