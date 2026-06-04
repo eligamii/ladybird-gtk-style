@@ -236,6 +236,7 @@ void ladybird_location_entry_set_loading(LadybirdLocationEntry* self, bool is_lo
 
     self->state->is_loading = is_loading;
     if (self->state->is_loading) {
+        gtk_widget_add_css_class(GTK_WIDGET(self), "loading");
         gtk_entry_set_progress_pulse_step(GTK_ENTRY(self), 0.15);
         self->state->loading_pulse_source_id = g_timeout_add_full(
             G_PRIORITY_DEFAULT,
@@ -252,7 +253,7 @@ void ladybird_location_entry_set_loading(LadybirdLocationEntry* self, bool is_lo
             g_source_remove(self->state->loading_pulse_source_id);
             self->state->loading_pulse_source_id = 0;
         }
-        gtk_entry_set_progress_fraction(GTK_ENTRY(self), 0.0);
+        gtk_widget_remove_css_class(GTK_WIDGET(self), "loading");
     }
 
     ladybird_location_entry_update_leading_icon(self);

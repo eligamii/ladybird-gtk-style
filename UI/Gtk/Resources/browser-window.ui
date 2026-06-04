@@ -15,7 +15,11 @@
               <object class="AdwClamp" id="location_entry_clamp">
                 <property name="maximum-size">800</property>
                 <child>
-                  <object class="LadybirdLocationEntry" id="location_entry"/>
+                  <object class="LadybirdLocationEntry" id="location_entry">
+                    <style>
+                      <class name="ladybird-location-entry"/>
+                    </style>
+                  </object>
                 </child>
               </object>
             </property>

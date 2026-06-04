@@ -1,3 +1,7 @@
+:root {
+    --ease-out-quad: cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+
 .ladybird-list-popover-separator-row {
     background: transparent;
     margin: 0;
@@ -14,4 +18,12 @@
 
 .ladybird-completion-popover row:hover {
     background-color: color-mix(in srgb, currentColor 5%, transparent);
+}
+
+.ladybird-location-entry progress {
+    transition: opacity 200ms var(--ease-out-quad);
+}
+
+.ladybird-location-entry:not(.loading) progress {
+    opacity: 0;
 }
