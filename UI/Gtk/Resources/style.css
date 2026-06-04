@@ -27,7 +27,7 @@
     background-color: color-mix(in srgb, currentColor 10%, transparent);
 }
 
-.ladybird-completion-popover row:hover {
+.ladybird-completion-popover row:hover:not(:selected) {
     background-color: color-mix(in srgb, currentColor 5%, transparent);
 }
 
