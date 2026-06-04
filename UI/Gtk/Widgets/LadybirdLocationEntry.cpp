@@ -261,7 +261,7 @@ void ladybird_location_entry_set_loading(LadybirdLocationEntry* self, bool is_lo
 static void ladybird_location_entry_update_leading_icon(LadybirdLocationEntry* self)
 {
     if (self->state->is_loading) {
-        gtk_entry_set_icon_from_icon_name(GTK_ENTRY(self), GTK_ENTRY_ICON_PRIMARY, "process-working-symbolic");
+        gtk_entry_set_icon_from_icon_name(GTK_ENTRY(self), GTK_ENTRY_ICON_PRIMARY, "content-loading-symbolic");
         gtk_entry_set_icon_tooltip_text(GTK_ENTRY(self), GTK_ENTRY_ICON_PRIMARY, "Loading");
         return;
     }
@@ -272,7 +272,7 @@ static void ladybird_location_entry_update_leading_icon(LadybirdLocationEntry* s
         return;
     }
 
-    gtk_entry_set_icon_from_icon_name(GTK_ENTRY(self), GTK_ENTRY_ICON_PRIMARY, nullptr);
+    gtk_entry_set_icon_from_icon_name(GTK_ENTRY(self), GTK_ENTRY_ICON_PRIMARY, "globe-alt2-symbolic");
     gtk_entry_set_icon_tooltip_text(GTK_ENTRY(self), GTK_ENTRY_ICON_PRIMARY, nullptr);
 }
 
