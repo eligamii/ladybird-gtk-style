@@ -331,6 +331,7 @@ public:
         : m_popover(GTK_POPOVER(gtk_popover_menu_new_from_model(nullptr)))
     {
         gtk_popover_set_has_arrow(m_popover, false);
+        gtk_widget_set_halign(GTK_WIDGET(m_popover), GTK_ALIGN_START);
         gtk_widget_set_parent(GTK_WIDGET(m_popover), &parent);
         m_action_group = GObjectPtr<GSimpleActionGroup> { g_simple_action_group_new() };
         gtk_widget_insert_action_group(GTK_WIDGET(m_popover), "context", G_ACTION_GROUP(m_action_group.ptr()));

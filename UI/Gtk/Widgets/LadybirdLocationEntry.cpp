@@ -81,10 +81,16 @@ static void ladybird_location_entry_finalize(GObject* object)
     G_OBJECT_CLASS(ladybird_location_entry_parent_class)->finalize(object);
 }
 
+static void ladybird_location_entry_size_allocate(GtkWidget* widget, int width, int height, int baseline)
+{
+    GTK_WIDGET_CLASS(ladybird_location_entry_parent_class)->size_allocate(widget, width, height, baseline);
+    gtk_popover_present(LADYBIRD_LOCATION_ENTRY(widget)->popover);
+}
+
 static void ladybird_location_entry_class_init(LadybirdLocationEntryClass* klass)
 {
-    auto* object_class = G_OBJECT_CLASS(klass);
-    object_class->finalize = ladybird_location_entry_finalize;
+    G_OBJECT_CLASS(klass)->finalize = ladybird_location_entry_finalize;
+    GTK_WIDGET_CLASS(klass)->size_allocate = ladybird_location_entry_size_allocate;
 }
 
 static void ladybird_location_entry_init(LadybirdLocationEntry* self)
@@ -355,9 +361,10 @@ static void ladybird_location_entry_show_completions(LadybirdLocationEntry* self
 
     gtk_list_box_unselect_all(self->list_box);
 
-    auto entry_width = gtk_widget_get_width(GTK_WIDGET(self));
-    if (entry_width > 0)
-        gtk_widget_set_size_request(GTK_WIDGET(self->popover), entry_width, -1);
+    graphene_rect_t bounds;
+    bool success = gtk_widget_compute_bounds(GTK_WIDGET(self), GTK_WIDGET(self), &bounds);
+    if (bounds.size.width > 0 && success)
+        gtk_widget_set_size_request(GTK_WIDGET(self->popover), static_cast<int>(bounds.size.width), -1);
 
     gtk_popover_popup(self->popover);
 }

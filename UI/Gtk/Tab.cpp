@@ -315,7 +315,7 @@ void Tab::show_select_dropdown(Gfx::IntPoint content_position, i32 minimum_width
 
     auto device_pixel_ratio = m_view->device_pixel_ratio();
     GdkRectangle rect = {
-        static_cast<int>(content_position.x() / device_pixel_ratio),
+        static_cast<int>(static_cast<double>(content_position.x() + minimum_width / 2) / device_pixel_ratio),
         static_cast<int>(content_position.y() / device_pixel_ratio),
         1, 1
     };
