@@ -135,11 +135,15 @@ static void ladybird_location_entry_init(LadybirdLocationEntry* self)
         self);
 
     // Autocomplete results callback
-    self->state->autocomplete->on_autocomplete_query_complete = [self](auto suggestions, auto) {
+    self->state->autocomplete->on_autocomplete_query_complete = [self](auto suggestions, WebView::AutocompleteResultKind kind) {
         if (suggestions.is_empty() || !self->state->is_focused) {
             ladybird_location_entry_hide_completions(self);
             return;
         }
+
+        if (kind != WebView::AutocompleteResultKind::Final)
+            return;
+
         self->state->suggestions = move(suggestions);
         self->state->selected_index = -1;
         ladybird_location_entry_show_completions(self);
