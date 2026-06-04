@@ -328,7 +328,7 @@ void Tab::show_select_dropdown(Gfx::IntPoint content_position, i32 minimum_width
     for (auto const& item : items) {
         item.visit(
             [&](Web::HTML::SelectItemOption const& option) {
-                append_select_option_row(list_box, option.label.to_byte_string().characters(), option.selected, option.disabled, option.id, 8);
+                append_select_option_row(list_box, option.label.to_byte_string().characters(), option.selected, option.disabled, option.id, 0);
             },
             [&](Web::HTML::SelectItemOptionGroup const& group) {
                 auto* header = gtk_label_new(group.label.to_byte_string().characters());
