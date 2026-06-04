@@ -14,7 +14,7 @@ struct LadybirdLocationEntry;
 GType ladybird_location_entry_get_type(void);
 LadybirdLocationEntry* ladybird_location_entry_new(void);
 
-void ladybird_location_entry_set_url(LadybirdLocationEntry* self, char const* url);
+void ladybird_location_entry_set_url(LadybirdLocationEntry* self, String const& url);
 void ladybird_location_entry_set_text(LadybirdLocationEntry* self, char const* text);
 void ladybird_location_entry_set_favicon(LadybirdLocationEntry* self, GdkPaintable* favicon);
 void ladybird_location_entry_set_loading(LadybirdLocationEntry* self, bool is_loading);

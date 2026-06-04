@@ -421,16 +421,16 @@ void BrowserWindow::bind_navigation_actions(WebContentView& view)
 void BrowserWindow::update_location_entry(URL::URL const& url)
 {
     if (is_internal_url(url)) {
-        ladybird_location_entry_set_url(m_location_entry, "");
+        ladybird_location_entry_set_text(m_location_entry, "");
         return;
     }
-    auto url_string = url.serialize().to_byte_string();
+    auto url_string = url.serialize();
 
     if (url_string.is_empty()) {
         ladybird_location_entry_set_text(m_location_entry, "");
         return;
     }
-    ladybird_location_entry_set_url(m_location_entry, url_string.characters());
+    ladybird_location_entry_set_url(m_location_entry, url_string);
 }
 
 void BrowserWindow::update_location_favicon(GdkPaintable* favicon)

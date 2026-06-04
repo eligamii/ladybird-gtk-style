@@ -21,6 +21,7 @@ struct LocationEntryState {
     Ladybird::GObjectPtr<GdkPaintable> favicon;
     int selected_index { -1 };
     String user_text;
+    String current_url;
     bool is_focused { false };
     bool is_loading { false };
     bool updating_text { false };
@@ -55,6 +56,7 @@ static void ladybird_location_entry_navigate(LadybirdLocationEntry* self);
 static void ladybird_location_entry_move_selection(LadybirdLocationEntry* self, int delta);
 static void ladybird_location_entry_apply_selected_suggestion(LadybirdLocationEntry* self);
 static void ladybird_location_entry_update_leading_icon(LadybirdLocationEntry* self);
+static void ladybird_location_entry_restore_url(LadybirdLocationEntry* self);
 
 static void ladybird_location_entry_completion_popover_header_func(GtkListBoxRow* row, GtkListBoxRow* before, gpointer)
 {
@@ -124,6 +126,7 @@ static void ladybird_location_entry_init(LadybirdLocationEntry* self)
         .favicon = {},
         .selected_index = -1,
         .user_text = {},
+        .current_url = {},
         .is_focused = false,
         .is_loading = false,
         .updating_text = false,
@@ -133,6 +136,7 @@ static void ladybird_location_entry_init(LadybirdLocationEntry* self)
 
     gtk_widget_set_hexpand(GTK_WIDGET(self), TRUE);
     gtk_entry_set_icon_activatable(GTK_ENTRY(self), GTK_ENTRY_ICON_PRIMARY, false);
+    gtk_entry_set_icon_tooltip_text(GTK_ENTRY(self), GTK_ENTRY_ICON_SECONDARY, "Set to current URL");
 
     if (auto const& search_engine = WebView::Application::settings().search_engine(); search_engine.has_value()) {
         auto placeholder = ByteString::formatted("Search with {} or enter URL", search_engine->name);
@@ -180,6 +184,9 @@ static void ladybird_location_entry_init(LadybirdLocationEntry* self)
     g_signal_connect_swapped(self, "changed", G_CALLBACK(+[](LadybirdLocationEntry* self, GtkEditable*) {
         if (!self->state->is_focused || self->state->updating_text)
             return;
+
+        gtk_entry_set_icon_from_icon_name(GTK_ENTRY(self), GTK_ENTRY_ICON_SECONDARY, "edit-undo-symbolic");
+
         auto* text = gtk_editable_get_text(GTK_EDITABLE(self));
         if (!text || text[0] == '\0') {
             ladybird_location_entry_hide_completions(self);
@@ -234,9 +241,22 @@ static void ladybird_location_entry_init(LadybirdLocationEntry* self)
         ladybird_location_entry_hide_completions(self);
         ladybird_location_entry_update_display_attributes(self);
         gtk_editable_select_region(GTK_EDITABLE(self), 0, 0);
+
+        auto* text = gtk_editable_get_text(GTK_EDITABLE(self));
+        if (!text || text[0] == '\0')
+            ladybird_location_entry_restore_url(self);
+
     }),
         self);
     gtk_widget_add_controller(GTK_WIDGET(self), GTK_EVENT_CONTROLLER(focus_controller));
+
+    // Undo button to restore url
+    g_signal_connect_swapped(self, "icon-press", G_CALLBACK(+[](LadybirdLocationEntry* self, GtkEntryIconPosition icon_pos) {
+        if (icon_pos == GTK_ENTRY_ICON_SECONDARY) {
+            ladybird_location_entry_restore_url(self);
+        }
+    }),
+        self);
 }
 
 // Public API
@@ -246,9 +266,13 @@ LadybirdLocationEntry* ladybird_location_entry_new(void)
     return LADYBIRD_LOCATION_ENTRY(g_object_new(LADYBIRD_TYPE_LOCATION_ENTRY, nullptr));
 }
 
-void ladybird_location_entry_set_url(LadybirdLocationEntry* self, char const* url)
+void ladybird_location_entry_set_url(LadybirdLocationEntry* self, String const& url)
 {
-    set_entry_text_suppressed(self, url ? url : "");
+    char const* url_string = url.to_byte_string().characters();
+    set_entry_text_suppressed(self, url_string);
+    gtk_entry_set_icon_from_paintable(GTK_ENTRY(self), GTK_ENTRY_ICON_SECONDARY, nullptr);
+
+    self->state->current_url = url;
 
     if (!self->state->is_focused)
         ladybird_location_entry_update_display_attributes(self);
@@ -256,6 +280,7 @@ void ladybird_location_entry_set_url(LadybirdLocationEntry* self, char const* ur
 
 void ladybird_location_entry_set_text(LadybirdLocationEntry* self, char const* text)
 {
+    self->state->current_url = {};
     set_entry_text_suppressed(self, text ? text : "");
     gtk_entry_set_attributes(GTK_ENTRY(self), nullptr);
     ladybird_location_entry_set_favicon(self, nullptr);
@@ -327,6 +352,13 @@ void ladybird_location_entry_set_on_navigate(LadybirdLocationEntry* self, Functi
 }
 
 // Internal helpers
+
+static void ladybird_location_entry_restore_url(LadybirdLocationEntry* self)
+{
+    set_entry_text_suppressed(self, self->state->current_url.to_byte_string().characters(), true);
+    gtk_entry_set_icon_from_paintable(GTK_ENTRY(self), GTK_ENTRY_ICON_SECONDARY, nullptr);
+    ladybird_location_entry_hide_completions(self);
+}
 
 static void ladybird_location_entry_update_display_attributes(LadybirdLocationEntry* self)
 {
