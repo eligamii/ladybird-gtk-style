@@ -58,11 +58,11 @@ static void ladybird_location_entry_update_leading_icon(LadybirdLocationEntry* s
 
 static void ladybird_location_entry_completion_popover_header_func(GtkListBoxRow* row, GtkListBoxRow* before, gpointer)
 {
-    const char* row_title = static_cast<const char*>(g_object_get_data(G_OBJECT(row), "section-name"));
-    const char* before_title = nullptr;
+    char const* row_title = static_cast<char const*>(g_object_get_data(G_OBJECT(row), "section-name"));
+    char const* before_title = nullptr;
 
     if (before) {
-        before_title = static_cast<const char*>(g_object_get_data(G_OBJECT(before), "section-name"));
+        before_title = static_cast<char const*>(g_object_get_data(G_OBJECT(before), "section-name"));
     }
 
     if (row_title != before_title && row_title) {
@@ -408,69 +408,70 @@ static GtkWidget* completion_item_new(WebView::AutocompleteSuggestion const& sug
 {
     auto* main_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
 
-        // Setup title box
-        auto* title_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
-        GtkWidget* icon = gtk_image_new();
-        gtk_widget_set_valign(icon, GTK_ALIGN_START);
-        gtk_box_append(GTK_BOX(title_box), icon);
+    // Setup title box
+    auto* title_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+    GtkWidget* icon = gtk_image_new();
+    gtk_widget_set_valign(icon, GTK_ALIGN_START);
+    gtk_box_append(GTK_BOX(title_box), icon);
 
-        auto* title = gtk_label_new(nullptr);
-        gtk_label_set_ellipsize(GTK_LABEL(title), PANGO_ELLIPSIZE_END);
-        gtk_label_set_xalign(GTK_LABEL(title), 0.0);
-        gtk_box_append(GTK_BOX(title_box), title);
+    auto* title = gtk_label_new(nullptr);
+    gtk_label_set_ellipsize(GTK_LABEL(title), PANGO_ELLIPSIZE_END);
+    gtk_label_set_xalign(GTK_LABEL(title), 0.0);
+    gtk_box_append(GTK_BOX(title_box), title);
 
-        gtk_widget_set_halign(title_box, GTK_ALIGN_FILL);
-        gtk_widget_set_hexpand(title_box, true);
-        gtk_box_append(GTK_BOX(main_box), title_box);
+    gtk_widget_set_halign(title_box, GTK_ALIGN_FILL);
+    gtk_widget_set_hexpand(title_box, true);
+    gtk_box_append(GTK_BOX(main_box), title_box);
 
-        // Setup subtitle
-        auto* subtitle = gtk_label_new(nullptr);
-        gtk_label_set_ellipsize(GTK_LABEL(subtitle), PANGO_ELLIPSIZE_END);
-        gtk_widget_set_halign(subtitle, GTK_ALIGN_START);
-        gtk_widget_add_css_class(subtitle, "dimmed");
-        gtk_box_append(GTK_BOX(main_box), subtitle);
+    // Setup subtitle
+    auto* subtitle = gtk_label_new(nullptr);
+    gtk_label_set_ellipsize(GTK_LABEL(subtitle), PANGO_ELLIPSIZE_END);
+    gtk_widget_set_halign(subtitle, GTK_ALIGN_START);
+    gtk_widget_add_css_class(subtitle, "dimmed");
+    gtk_box_append(GTK_BOX(main_box), subtitle);
 
-        bool is_icon_set = false;
-        if (suggestion.favicon_base64_png.has_value()) {
-            gsize size;
-            g_autofree auto* icon_buffer = g_base64_decode(suggestion.favicon_base64_png.value().to_byte_string().characters(), &size);
+    bool is_icon_set = false;
+    if (suggestion.favicon_base64_png.has_value()) {
+        gsize size;
+        g_autofree auto* icon_buffer = g_base64_decode(suggestion.favicon_base64_png.value().to_byte_string().characters(), &size);
 
-            if (icon_buffer) {
-                GdkTexture* texture = gdk_texture_new_from_bytes(g_bytes_new(icon_buffer, size), nullptr);
+        if (icon_buffer) {
+            GdkTexture* texture = gdk_texture_new_from_bytes(g_bytes_new(icon_buffer, size), nullptr);
 
-                if (texture) {
-                    is_icon_set = true;
-                    gtk_image_set_from_paintable(GTK_IMAGE(icon), GDK_PAINTABLE(texture));
-                }
+            if (texture) {
+                is_icon_set = true;
+                gtk_image_set_from_paintable(GTK_IMAGE(icon), GDK_PAINTABLE(texture));
             }
         }
-        if (!is_icon_set) {
-            gtk_image_set_from_icon_name(GTK_IMAGE(icon), icon_name_from_completion_source(suggestion.source));
-        }
+    }
+    if (!is_icon_set) {
+        gtk_image_set_from_icon_name(GTK_IMAGE(icon), icon_name_from_completion_source(suggestion.source));
+    }
 
-        const char* title_text = suggestion.title
-            .value_or(suggestion.text)
-            .to_byte_string().characters();
-        gtk_label_set_label(GTK_LABEL(title), title_text);
+    char const* title_text = suggestion.title
+                                 .value_or(suggestion.text)
+                                 .to_byte_string()
+                                 .characters();
+    gtk_label_set_label(GTK_LABEL(title), title_text);
 
-        const char* subtitle_text = nullptr;
-        if (suggestion.subtitle.has_value())
-            subtitle_text = suggestion.subtitle.value().to_byte_string().characters();
-        else if (suggestion.title.has_value())
-            subtitle_text = suggestion.text.to_byte_string().characters();
+    char const* subtitle_text = nullptr;
+    if (suggestion.subtitle.has_value())
+        subtitle_text = suggestion.subtitle.value().to_byte_string().characters();
+    else if (suggestion.title.has_value())
+        subtitle_text = suggestion.text.to_byte_string().characters();
 
-        if (subtitle_text) {
-            gtk_label_set_label(GTK_LABEL(subtitle), subtitle_text);
-            gtk_widget_set_visible(GTK_WIDGET(subtitle), true);
-        } else {
-            gtk_widget_set_visible(GTK_WIDGET(subtitle), false);
-        }
+    if (subtitle_text) {
+        gtk_label_set_label(GTK_LABEL(subtitle), subtitle_text);
+        gtk_widget_set_visible(GTK_WIDGET(subtitle), true);
+    } else {
+        gtk_widget_set_visible(GTK_WIDGET(subtitle), false);
+    }
 
-        GtkWidget* row = gtk_list_box_row_new();
-        g_object_set_data(G_OBJECT(row), "section-name", const_cast<char*>(completion_section_to_string(suggestion.section)));
-        gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), main_box);
+    GtkWidget* row = gtk_list_box_row_new();
+    g_object_set_data(G_OBJECT(row), "section-name", const_cast<char*>(completion_section_to_string(suggestion.section)));
+    gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), main_box);
 
-        return row;
+    return row;
 }
 
 static void ladybird_location_entry_show_completions(LadybirdLocationEntry* self)
@@ -507,20 +508,34 @@ static void ladybird_location_entry_move_selection(LadybirdLocationEntry* self, 
         return;
 
     auto new_index = state.selected_index + delta;
-    if (new_index < -1)
+    if (new_index < 0)
         new_index = static_cast<int>(state.suggestions.size()) - 1;
     if (new_index >= static_cast<int>(state.suggestions.size()))
-        new_index = -1;
+        new_index = 0;
 
     state.selected_index = new_index;
 
-    if (state.selected_index >= 0) {
-        auto* row = gtk_list_box_get_row_at_index(self->list_box, state.selected_index);
-        gtk_list_box_select_row(self->list_box, row);
-        ladybird_location_entry_apply_selected_suggestion(self);
-    } else {
-        gtk_list_box_unselect_all(self->list_box);
-        set_entry_text_suppressed(self, state.user_text.to_byte_string().characters(), true);
+    auto* row = gtk_list_box_get_row_at_index(self->list_box, state.selected_index);
+    gtk_list_box_select_row(self->list_box, row);
+    ladybird_location_entry_apply_selected_suggestion(self);
+
+    // Scroll to current row if outside of view
+    auto* scrolled_window = gtk_widget_get_ancestor(GTK_WIDGET(self->list_box), GTK_TYPE_SCROLLED_WINDOW);
+    if (scrolled_window) {
+        graphene_rect_t row_bounds;
+        bool success = gtk_widget_compute_bounds(GTK_WIDGET(row), GTK_WIDGET(self->list_box), &row_bounds);
+
+        if (success) {
+            auto* v_adjustment = gtk_scrolled_window_get_vadjustment(GTK_SCROLLED_WINDOW(scrolled_window));
+            double current_y = gtk_adjustment_get_value(v_adjustment);
+            double height = gtk_widget_get_height(GTK_WIDGET(scrolled_window));
+
+            // If the current row is not fully visible
+            if (row_bounds.origin.y < current_y || row_bounds.origin.y + row_bounds.size.height > current_y + height) {
+                gtk_adjustment_set_value(v_adjustment, new_index == 0 ? 0 : row_bounds.origin.y);
+                gtk_scrolled_window_set_vadjustment(GTK_SCROLLED_WINDOW(scrolled_window), v_adjustment);
+            }
+        }
     }
 }
 
