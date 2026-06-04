@@ -20,3 +20,4 @@ GType ladybird_web_view_get_type(void);
 LadybirdWebView* ladybird_web_view_new(void);
 Ladybird::WebContentView* ladybird_web_view_get_impl(LadybirdWebView* self);
 void ladybird_web_view_set_impl(LadybirdWebView* self, Ladybird::WebContentView* impl);
+void ladybird_web_view_init_context_menu(LadybirdWebView* self);

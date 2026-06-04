@@ -7,6 +7,8 @@
 #include <AK/Assertions.h>
 #include <UI/Gtk/Widgets/LadybirdBrowserWindow.h>
 
+#include "LadybirdLocationEntry.h"
+
 struct LadybirdBrowserWindow {
     AdwApplicationWindow parent_instance;
     AdwToolbarView* toolbar_view { nullptr };
@@ -26,6 +28,7 @@ struct LadybirdBrowserWindow {
     GtkLabel* zoom_label { nullptr };
     AdwBanner* devtools_banner { nullptr };
     GMenu* hamburger_menu { nullptr };
+    LadybirdLocationEntry* location_entry { nullptr };
 };
 
 struct LadybirdBrowserWindowClass {
@@ -37,6 +40,9 @@ G_DEFINE_FINAL_TYPE(LadybirdBrowserWindow, ladybird_browser_window, ADW_TYPE_APP
 
 static void ladybird_browser_window_class_init(LadybirdBrowserWindowClass* klass)
 {
+    // To allow for any custom widgets to be used in templates
+    g_type_ensure(ladybird_location_entry_get_type());
+
     auto* widget_class = GTK_WIDGET_CLASS(klass);
     gtk_widget_class_set_template_from_resource(widget_class, "/org/ladybird/Ladybird/gtk/browser-window.ui");
 
@@ -57,6 +63,7 @@ static void ladybird_browser_window_class_init(LadybirdBrowserWindowClass* klass
     gtk_widget_class_bind_template_child(widget_class, LadybirdBrowserWindow, zoom_label);
     gtk_widget_class_bind_template_child(widget_class, LadybirdBrowserWindow, devtools_banner);
     gtk_widget_class_bind_template_child(widget_class, LadybirdBrowserWindow, hamburger_menu);
+    gtk_widget_class_bind_template_child(widget_class, LadybirdBrowserWindow, location_entry);
 }
 
 static void ladybird_browser_window_init(LadybirdBrowserWindow* self)
@@ -84,5 +91,6 @@ GtkLabel* browser_window_find_result_label(LadybirdBrowserWindow* window) { retu
 GMenu* browser_window_hamburger_menu(LadybirdBrowserWindow* window) { return window->hamburger_menu; }
 AdwToastOverlay* browser_window_toast_overlay(LadybirdBrowserWindow* window) { return window->toast_overlay; }
 GtkMenuButton* browser_window_menu_button(LadybirdBrowserWindow* window) { return window->menu_button; }
+LadybirdLocationEntry* browser_window_location_entry(LadybirdBrowserWindow* window) { return window->location_entry; }
 
 }

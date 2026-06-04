@@ -8,6 +8,7 @@
 
 #include <adwaita.h>
 
+struct LadybirdLocationEntry;
 struct LadybirdBrowserWindow;
 
 namespace LadybirdWidgets {
@@ -25,5 +26,6 @@ GtkLabel* browser_window_find_result_label(LadybirdBrowserWindow*);
 GMenu* browser_window_hamburger_menu(LadybirdBrowserWindow*);
 AdwToastOverlay* browser_window_toast_overlay(LadybirdBrowserWindow*);
 GtkMenuButton* browser_window_menu_button(LadybirdBrowserWindow*);
+LadybirdLocationEntry* browser_window_location_entry(LadybirdBrowserWindow* window);
 
 }

@@ -145,6 +145,7 @@ void BrowserWindow::setup_ui(AdwApplication* app)
     m_find_entry = LadybirdWidgets::browser_window_find_entry(browser_window_widget);
     m_find_result_label = LadybirdWidgets::browser_window_find_result_label(browser_window_widget);
     m_toast_overlay = LadybirdWidgets::browser_window_toast_overlay(browser_window_widget);
+    m_location_entry = LadybirdWidgets::browser_window_location_entry(browser_window_widget);
 
     // Connect find entry signals
     g_signal_connect_swapped(m_find_entry, "search-changed", G_CALLBACK(+[](BrowserWindow* self, GtkSearchEntry* entry) {
@@ -189,8 +190,7 @@ void BrowserWindow::setup_ui(AdwApplication* app)
         this);
 
     // URL entry (centered title widget)
-    m_location_entry = ladybird_location_entry_new();
-    ladybird_location_entry_set_on_navigate(m_location_entry, [this](String url_string) {
+    ladybird_location_entry_set_on_navigate(m_location_entry, [this](const String& url_string) {
         if (auto url = URL::Parser::basic_parse(url_string); url.has_value()) {
             if (auto* tab = current_tab())
                 tab->navigate(url.release_value());
@@ -198,8 +198,6 @@ void BrowserWindow::setup_ui(AdwApplication* app)
                 gtk_widget_grab_focus(GTK_WIDGET(v->gtk_widget()));
         }
     });
-
-    adw_header_bar_set_title_widget(m_header_bar, GTK_WIDGET(m_location_entry));
 
     GObjectPtr developer_tools_submenu { g_menu_new() };
     GObjectPtr inspect_gmenu { create_application_menu(WebView::Application::the().inspect_menu(), [](WebView::Action& action) {
