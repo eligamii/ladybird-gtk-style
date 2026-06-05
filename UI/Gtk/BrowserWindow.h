@@ -22,7 +22,7 @@ class WebContentView;
 
 class BrowserWindow {
 public:
-    BrowserWindow(AdwApplication* app, Vector<URL::URL> const& initial_urls);
+    BrowserWindow(AdwApplication* app);
     ~BrowserWindow();
 
     GtkWindow* gtk_window() const { return GTK_WINDOW(m_window); }
@@ -61,6 +61,8 @@ private:
     void on_tab_close_request(AdwTabPage* page);
     void on_tab_switched();
     void bind_navigation_actions(WebContentView& view);
+
+    static OwnPtr<Tab> s_detached_tab;
 
     AdwApplicationWindow* m_window { nullptr };
     LadybirdLocationEntry* m_location_entry { nullptr };

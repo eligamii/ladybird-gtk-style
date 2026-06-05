@@ -117,9 +117,9 @@ void Application::on_activate()
         new_window({});
 }
 
-BrowserWindow& Application::new_window(Vector<URL::URL> const& initial_urls)
+BrowserWindow& Application::new_empty_window()
 {
-    auto window = make<BrowserWindow>(m_adw_application, initial_urls);
+    auto window = make<BrowserWindow>(m_adw_application);
     auto& window_ref = *window;
     m_active_window = &window_ref;
 
@@ -158,6 +158,21 @@ BrowserWindow& Application::new_window(Vector<URL::URL> const& initial_urls)
     window_ref.present();
     m_windows.append(move(window));
     return window_ref;
+}
+
+BrowserWindow& Application::new_window(Vector<URL::URL> const& initial_urls)
+{
+    auto& window = new_empty_window();
+
+    if (initial_urls.is_empty()) {
+        window.create_new_tab(Web::HTML::ActivateTab::Yes);
+    } else {
+        for (size_t i = 0; i < initial_urls.size(); ++i) {
+            window.create_new_tab(initial_urls[i], (i == 0) ? Web::HTML::ActivateTab::Yes : Web::HTML::ActivateTab::No);
+        }
+    }
+
+    return window;
 }
 
 void Application::remove_window(BrowserWindow& window)

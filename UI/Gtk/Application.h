@@ -25,6 +25,7 @@ public:
     virtual ~Application() override;
 
     BrowserWindow& new_window(Vector<URL::URL> const& initial_urls);
+    BrowserWindow& new_empty_window();
     void remove_window(BrowserWindow&);
 
     BrowserWindow* active_window() const { return m_active_window; }

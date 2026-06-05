@@ -34,6 +34,8 @@ private:
     GSimpleAction* m_gaction;
 };
 
+OwnPtr<Tab> BrowserWindow::s_detached_tab {};
+
 void BrowserWindow::ActionBinding::detach()
 {
     if (action && observer)
@@ -42,18 +44,10 @@ void BrowserWindow::ActionBinding::detach()
     observer = nullptr;
 }
 
-BrowserWindow::BrowserWindow(AdwApplication* app, Vector<URL::URL> const& initial_urls)
+BrowserWindow::BrowserWindow(AdwApplication* app)
 {
     setup_ui(app);
     setup_keyboard_shortcuts();
-
-    if (initial_urls.is_empty()) {
-        create_new_tab(Web::HTML::ActivateTab::Yes);
-    } else {
-        for (size_t i = 0; i < initial_urls.size(); ++i) {
-            create_new_tab(initial_urls[i], (i == 0) ? Web::HTML::ActivateTab::Yes : Web::HTML::ActivateTab::No);
-        }
-    }
 }
 
 BrowserWindow::~BrowserWindow()
@@ -184,6 +178,35 @@ void BrowserWindow::setup_ui(AdwApplication* app)
     }),
         this);
 
+    g_signal_connect_swapped(m_tab_view, "create-window", G_CALLBACK(+[](BrowserWindow*, AdwTabView*) -> AdwTabView* {
+        auto& window = Application::the().new_empty_window();
+        return window.m_tab_view;
+    }),
+        this);
+
+    g_signal_connect_swapped(m_tab_view, "page-detached", G_CALLBACK(+[](BrowserWindow* self, AdwTabPage* page, gint, gpointer) {
+        if (adw_tab_view_get_is_transferring_page(self->m_tab_view)) {
+            auto it = self->m_tabs.find_if([page](NonnullOwnPtr<Tab>& tab) {
+                return tab->tab_page() == page;
+            });
+
+            self->s_detached_tab = self->m_tabs.take(it.index());
+            warnln("{}", self->s_detached_tab);
+        }
+    }),
+        this);
+
+    g_signal_connect_swapped(m_tab_view, "page-attached", G_CALLBACK(+[](BrowserWindow* self, AdwTabPage* page, gint, gpointer) {
+        warnln("{}", self->s_detached_tab.ptr());
+
+        if (adw_tab_view_get_is_transferring_page(self->m_tab_view)) {
+            self->s_detached_tab->set_tab_page(page);
+            self->s_detached_tab->m_window = self;
+            self->m_tabs.append(self->s_detached_tab.release_nonnull());
+        }
+    }),
+        this);
+
     g_signal_connect_swapped(m_tab_view, "notify::selected-page", G_CALLBACK(+[](BrowserWindow* self, GParamSpec*) {
         self->on_tab_switched();
     }),
@@ -300,7 +323,7 @@ Tab& BrowserWindow::create_new_tab(Web::HTML::ActivateTab activate_tab)
 
 Tab& BrowserWindow::create_new_tab(URL::URL const& url, Web::HTML::ActivateTab activate_tab)
 {
-    auto tab = make<Tab>(*this, url);
+    auto tab = make<Tab>(this, url);
     auto& tab_ref = *tab;
 
     auto* page = adw_tab_view_append(m_tab_view, tab_ref.widget());
@@ -323,7 +346,7 @@ Tab& BrowserWindow::create_new_tab(URL::URL const& url, Web::HTML::ActivateTab a
 
 Tab& BrowserWindow::create_child_tab(Web::HTML::ActivateTab activate_tab, Tab& parent, u64 page_index)
 {
-    auto tab = make<Tab>(*this, parent.view().client(), page_index);
+    auto tab = make<Tab>(this, parent.view().client(), page_index);
     auto& tab_ref = *tab;
 
     auto* page = adw_tab_view_append(m_tab_view, tab_ref.widget());
