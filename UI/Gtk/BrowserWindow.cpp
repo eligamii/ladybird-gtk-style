@@ -80,6 +80,10 @@ void BrowserWindow::register_actions()
     add_action("close-tab", [](BrowserWindow& self) { self.close_current_tab(); });
     add_action("focus-location", [](BrowserWindow& self) { ladybird_location_entry_focus_and_select_all(self.m_location_entry); });
 
+    add_action("open-overview", [](BrowserWindow& self) {
+        adw_tab_overview_set_open(self.m_tab_overview, true);
+    });
+
     add_action("go-back", [](BrowserWindow& self) {
         if (auto* tab = self.current_tab())
             tab->view().traverse_the_history_by_delta(-1); }, false);
@@ -140,6 +144,13 @@ void BrowserWindow::setup_ui(AdwApplication* app)
     m_find_result_label = LadybirdWidgets::browser_window_find_result_label(browser_window_widget);
     m_toast_overlay = LadybirdWidgets::browser_window_toast_overlay(browser_window_widget);
     m_location_entry = LadybirdWidgets::browser_window_location_entry(browser_window_widget);
+    m_tab_overview = LadybirdWidgets::browser_window_tab_overview(browser_window_widget);
+
+    g_signal_connect_swapped(m_tab_overview, "create-tab", G_CALLBACK(+[](BrowserWindow* self, AdwTabOverview*) {
+        auto& tab = self->create_new_tab(Web::HTML::ActivateTab::Yes);
+        return tab.tab_page();
+    }),
+        this);
 
     // Connect find entry signals
     g_signal_connect_swapped(m_find_entry, "search-changed", G_CALLBACK(+[](BrowserWindow* self, GtkSearchEntry* entry) {
@@ -286,6 +297,7 @@ void BrowserWindow::setup_keyboard_shortcuts()
     set_accels("win.fullscreen", { "F11" });
     set_accels("win.quit", { "<Ctrl>q" });
     set_accels("win.new-window", { "<Ctrl>n" });
+    set_accels("win.open-overview", { "<Ctrl><Shift>o" });
 }
 
 void BrowserWindow::on_tab_switched()

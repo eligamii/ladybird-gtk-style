@@ -69,6 +69,7 @@ private:
     Vector<NonnullOwnPtr<Tab>> m_tabs;
 
     AdwTabView* m_tab_view { nullptr };
+    AdwTabOverview* m_tab_overview { nullptr };
     AdwHeaderBar* m_header_bar { nullptr };
     GtkButton* m_restore_button { nullptr };
     GtkLabel* m_zoom_label { nullptr };
