@@ -7,8 +7,10 @@
 
 #include <AK/ByteBuffer.h>
 #include <AK/MemoryStream.h>
+#include <AK/NeverDestroyed.h>
 #include <AK/ScopeGuard.h>
 #include <AK/StringBuilder.h>
+#include <LibCore/EventLoop.h>
 #include <LibCrypto/Hash/SHA2.h>
 #include <LibHTTP/Cache/Utilities.h>
 #include <LibJS/Runtime/Array.h>
@@ -22,6 +24,7 @@
 #include <LibJS/Runtime/VM.h>
 #include <LibJS/Runtime/ValueInlines.h>
 #include <LibRequests/RequestClient.h>
+#include <LibThreading/ThreadPool.h>
 #include <LibURL/Parser.h>
 #include <LibWasm/AbstractMachine/Validator.h>
 #include <LibWeb/Bindings/Intrinsics.h>
@@ -52,11 +55,15 @@ static GC::Ref<WebIDL::Promise> compile_potential_webassembly_response(JS::VM&, 
 
 namespace Detail {
 
-GC::WeakHashMap<JS::Object, WebAssemblyCache> s_caches;
+static GC::WeakHashMap<JS::Object, WebAssemblyCache>& caches()
+{
+    static NeverDestroyed<GC::WeakHashMap<JS::Object, WebAssemblyCache>> caches;
+    return *caches;
+}
 
 WebAssemblyCache& get_cache(JS::Realm& realm)
 {
-    return s_caches.ensure(realm.global_object());
+    return caches().ensure(realm.global_object());
 }
 
 }
@@ -64,13 +71,14 @@ WebAssemblyCache& get_cache(JS::Realm& realm)
 void visit_edges(JS::Object& object, JS::Cell::Visitor& visitor)
 {
     auto& global_object = HTML::relevant_global_object(object);
-    if (auto maybe_cache = Detail::s_caches.get(global_object); maybe_cache.has_value()) {
+    if (auto maybe_cache = Detail::caches().get(global_object); maybe_cache.has_value()) {
         auto& cache = maybe_cache.value();
         visitor.visit(cache.function_instances());
         visitor.visit(cache.imported_objects());
         visitor.visit(cache.extern_values());
         visitor.visit(cache.global_instances());
         visitor.visit(cache.memory_instances());
+        visitor.visit(cache.table_instances());
         cache.abstract_machine().visit_external_resources({ .visit_trap = [&visitor](Wasm::ExternallyManagedTrap const& trap) {
             auto& completion = trap.unsafe_external_object_as<JS::Completion>();
             visitor.visit(completion.value());
@@ -81,7 +89,7 @@ void visit_edges(JS::Object& object, JS::Cell::Visitor& visitor)
 void finalize(JS::Object& object)
 {
     auto& global_object = HTML::relevant_global_object(object);
-    Detail::s_caches.remove(global_object);
+    Detail::caches().remove(global_object);
 }
 
 // https://webassembly.github.io/spec/js-api/#error-objects
@@ -104,20 +112,28 @@ void initialize(JS::Object& self, JS::Realm&)
 }
 
 // https://webassembly.github.io/spec/js-api/#dom-webassembly-validate
-bool validate(JS::VM& vm, GC::Ref<WebIDL::BufferSource> bytes)
+bool validate(JS::VM& vm, WebIDL::BufferSource bytes)
 {
     // 1. Let stableBytes be a copy of the bytes held by the buffer bytes.
-    auto stable_bytes = WebIDL::get_buffer_source_copy(*bytes->raw_object());
+    auto stable_bytes = WebIDL::get_buffer_source_copy(bytes);
     if (stable_bytes.is_error()) {
         VERIFY(stable_bytes.error().code() == ENOMEM);
         return false;
     }
 
     // 2. Compile stableBytes as a WebAssembly module and store the results as module.
-    auto module_or_error = Detail::compile_a_webassembly_module(vm, stable_bytes.release_value());
+    // NOTE: We inline only the validation here to avoid the full compilation cost for just `validate()`.
+    auto stable_bytes_buffer = stable_bytes.release_value();
+    FixedMemoryStream stream { stable_bytes_buffer.bytes() };
+    auto module_or_error = Wasm::Module::parse(stream);
 
     // 3. If module is error, return false.
     if (module_or_error.is_error())
+        return false;
+
+    auto& cache = Detail::get_cache(*vm.current_realm());
+    auto validation_result = cache.abstract_machine().validate(module_or_error.value(), {}, Wasm::CompileToNative::No);
+    if (validation_result.is_error())
         return false;
 
     // 4. Return true.
@@ -125,12 +141,12 @@ bool validate(JS::VM& vm, GC::Ref<WebIDL::BufferSource> bytes)
 }
 
 // https://webassembly.github.io/spec/js-api/#dom-webassembly-compile
-WebIDL::ExceptionOr<GC::Ref<WebIDL::Promise>> compile(JS::VM& vm, GC::Ref<WebIDL::BufferSource> bytes)
+WebIDL::ExceptionOr<GC::Ref<WebIDL::Promise>> compile(JS::VM& vm, WebIDL::BufferSource bytes)
 {
     auto& realm = *vm.current_realm();
 
     // 1. Let stableBytes be a copy of the bytes held by the buffer bytes.
-    auto stable_bytes = WebIDL::get_buffer_source_copy(*bytes->raw_object());
+    auto stable_bytes = WebIDL::get_buffer_source_copy(bytes);
     if (stable_bytes.is_error()) {
         VERIFY(stable_bytes.error().code() == ENOMEM);
         return WebIDL::create_rejected_promise_from_exception(realm, vm.throw_completion<JS::InternalError>(vm.error_message(JS::VM::ErrorMessage::OutOfMemory)));
@@ -149,12 +165,12 @@ WebIDL::ExceptionOr<GC::Ref<WebIDL::Promise>> compile_streaming(JS::VM& vm, GC::
 
 // https://webassembly.github.io/spec/js-api/#dom-webassembly-instantiate
 // https://webassembly.github.io/content-security-policy/js-api/#dom-webassembly-instantiate
-WebIDL::ExceptionOr<GC::Ref<WebIDL::Promise>> instantiate(JS::VM& vm, GC::Ref<WebIDL::BufferSource> bytes, GC::Ptr<JS::Object> import_object)
+WebIDL::ExceptionOr<GC::Ref<WebIDL::Promise>> instantiate(JS::VM& vm, WebIDL::BufferSource bytes, GC::Ptr<JS::Object> import_object)
 {
     auto& realm = *vm.current_realm();
 
     // 1. Let stableBytes be a copy of the bytes held by the buffer bytes.
-    auto stable_bytes = WebIDL::get_buffer_source_copy(*bytes->raw_object());
+    auto stable_bytes = WebIDL::get_buffer_source_copy(bytes);
     if (stable_bytes.is_error()) {
         VERIFY(stable_bytes.error().code() == ENOMEM);
         return WebIDL::create_rejected_promise_from_exception(realm, vm.throw_completion<JS::InternalError>(vm.error_message(JS::VM::ErrorMessage::OutOfMemory)));
@@ -443,12 +459,7 @@ JS::ThrowCompletionOr<NonnullRefPtr<CompiledWebAssemblyModule>> compile_a_webass
         return vm.throw_completion<CompileError>(Wasm::parse_error_to_byte_string(module_result.error()));
     }
 
-    // Content-keyed disk cache: hash the wasm bytes, slot into the HTTP side-data
-    // shelf under a synthetic wasm-cache://<hex> URL (with a stub index entry to
-    // satisfy the shelf's "associated data needs a real entry" invariant). Works
-    // regardless of whether the caller had a URL.
-    // existing_blob view is borrowed below; the AnonymousBuffer must outlive validate().
-    Optional<Core::AnonymousBuffer> existing_buf;
+    // Content-keyed disk cache: hash the wasm bytes, slot into the HTTP side-data shelf under a synthetic wasm-cache://<hex> URL
     Optional<Wasm::CompileCacheConfig> wasm_cache_config;
     if (ResourceLoader::is_initialized() && ResourceLoader::the().request_client()) {
         auto digest = ::Crypto::Hash::SHA256::hash(data.data(), data.size());
@@ -470,38 +481,47 @@ JS::ThrowCompletionOr<NonnullRefPtr<CompiledWebAssemblyModule>> compile_a_webass
                 HTTP::CacheEntryAssociatedData::WebAssemblyCompiledCode);
             if (!retrieve_result.is_error()) {
                 if (auto buf = retrieve_result.release_value(); buf.has_value()) {
-                    existing_buf = buf.release_value();
-                    config.existing_blob = existing_buf->bytes();
+                    // Copy into an owned buffer: compilation may run on another thread long after the AnonymousBuffer here goes away.
+                    if (auto copy = ByteBuffer::copy(buf->bytes()); !copy.is_error())
+                        config.existing_blob = copy.release_value();
                 }
             }
 
-            config.on_compiled = [url = *synthetic_url, method = move(method)](ByteBuffer blob) mutable {
-                if (!ResourceLoader::is_initialized() || !ResourceLoader::the().request_client())
+            config.on_compiled = [url = *synthetic_url, method = move(method), event_loop_weak = Core::EventLoop::current_weak()](ByteBuffer blob) mutable {
+                auto origin = event_loop_weak->take();
+                if (!origin)
                     return;
-                (void)ResourceLoader::the().request_client()->store_cache_associated_data(
-                    url, method, OptionalNone {}, 0u,
-                    HTTP::CacheEntryAssociatedData::WebAssemblyCompiledCode, blob.bytes());
+                origin->deferred_invoke([url = move(url), method = move(method), blob = move(blob)]() mutable {
+                    if (!ResourceLoader::is_initialized() || !ResourceLoader::the().request_client())
+                        return;
+                    (void)ResourceLoader::the().request_client()->store_cache_associated_data(
+                        url, method, OptionalNone {}, 0u,
+                        HTTP::CacheEntryAssociatedData::WebAssemblyCompiledCode, blob.bytes());
+                });
             };
-
-            config.out_cranelift_time = &stats.cranelift_time;
-            config.out_function_count = &stats.function_count;
-            config.out_cranelift_blob_size_bytes = &stats.cranelift_blob_size_bytes;
-            config.out_cache_hit = &stats.cache_hit;
             wasm_cache_config = move(config);
         }
     }
 
+    constexpr auto compile_to_native = Wasm::CompileToNative::No;
+
     auto& cache = get_cache(*vm.current_realm());
     auto validate_start = MonotonicTime::now();
-    auto validation_result = cache.abstract_machine().validate(module_result.value(), move(wasm_cache_config));
+    auto validation_result = cache.abstract_machine().validate(module_result.value(), {}, compile_to_native);
     stats.validate_time = MonotonicTime::now() - validate_start;
-    Wasm::record_module_stats(stats);
 
     if (validation_result.is_error()) {
         return vm.throw_completion<CompileError>(validation_result.error().error_string);
     }
+
     auto compiled_module = make_ref_counted<CompiledWebAssemblyModule>(module_result.release_value());
     cache.add_compiled_module(compiled_module);
+    if (wasm_cache_config.has_value())
+        compiled_module->module->set_cranelift_cache_config(wasm_cache_config.release_value());
+    compiled_module->module->set_compile_stats(move(stats));
+    Threading::ThreadPool::the().submit([module = NonnullRefPtr { compiled_module->module }] {
+        Wasm::start_cranelift_compilation(*module);
+    });
     return compiled_module;
 }
 
@@ -715,7 +735,7 @@ JS::NativeFunction* create_native_function(JS::VM& vm, Wasm::FunctionAddress add
 
 JS::ThrowCompletionOr<Wasm::Value> to_webassembly_value(JS::VM& vm, JS::Value value, Wasm::ValueType const& type)
 {
-    static ::Crypto::SignedBigInteger two_64 = TRY_OR_THROW_OOM(vm, "1"_sbigint.shift_left(64));
+    static auto& two_64 = *new ::Crypto::SignedBigInteger(TRY_OR_THROW_OOM(vm, "1"_sbigint.shift_left(64)));
 
     switch (type.kind()) {
     case Wasm::ValueType::I64: {

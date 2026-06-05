@@ -122,16 +122,29 @@ bool Paintable::handle_mousewheel(Badge<EventHandler>, CSSPixelPoint, unsigned, 
     return false;
 }
 
-TraversalDecision Paintable::hit_test(CSSPixelPoint, HitTestType, Function<TraversalDecision(HitTestResult)> const&) const
-{
-    return TraversalDecision::Continue;
-}
-
 bool Paintable::has_stacking_context() const
 {
     if (auto const* paintable_box = as_if<PaintableBox>(this))
         return paintable_box->stacking_context();
     return false;
+}
+
+DOM::Node* HitTestResult::dom_node()
+{
+    for (auto* current = paintable.ptr(); current; current = current->parent()) {
+        if (auto node = current->dom_node())
+            return node;
+    }
+    return nullptr;
+}
+
+DOM::Node const* HitTestResult::dom_node() const
+{
+    for (auto const* current = paintable.ptr(); current; current = current->parent()) {
+        if (auto node = current->dom_node())
+            return node;
+    }
+    return nullptr;
 }
 
 RefPtr<StackingContext> Paintable::enclosing_stacking_context()
@@ -171,9 +184,9 @@ void Paintable::paint_with_inspector_overlay_context(DisplayListRecordingContext
         auto& visual_context_tree = const_cast<ViewportPaintable&>(*viewport_paintable).visual_context_tree();
         auto visual_context_index = paintable_box->accumulated_visual_context_index();
 
-        if (visual_context_index.value()) {
+        if (visual_context_index != VISUAL_VIEWPORT_NODE_INDEX) {
             Vector<VisualContextIndex> relevant_indices;
-            for (auto i = visual_context_index; i.value(); i = visual_context_tree.node_at(i).parent_index) {
+            for (auto i = visual_context_index; i != VISUAL_VIEWPORT_NODE_INDEX; i = visual_context_tree.node_at(i).parent_index) {
                 auto should_keep = visual_context_tree.node_at(i).data.visit(
                     [](ScrollData const&) { return true; },
                     [](ClipData const&) { return false; },
@@ -186,11 +199,11 @@ void Paintable::paint_with_inspector_overlay_context(DisplayListRecordingContext
                     relevant_indices.append(i);
             }
 
-            VisualContextIndex overlay_visual_context_index {};
+            auto overlay_visual_context_index = VISUAL_VIEWPORT_NODE_INDEX;
             for (auto const& source_visual_context_index : relevant_indices.in_reverse())
                 overlay_visual_context_index = visual_context_tree.append(visual_context_tree.node_at(source_visual_context_index).data, overlay_visual_context_index);
 
-            if (overlay_visual_context_index.value())
+            if (overlay_visual_context_index != VISUAL_VIEWPORT_NODE_INDEX)
                 display_list_recorder.set_accumulated_visual_context(overlay_visual_context_index);
         }
     }

@@ -9,6 +9,7 @@
 #include <LibDevTools/Actors/HighlighterActor.h>
 #include <LibDevTools/Actors/InspectorActor.h>
 #include <LibDevTools/Actors/PageStyleActor.h>
+#include <LibDevTools/Actors/StyleSheetsActor.h>
 #include <LibDevTools/Actors/TabActor.h>
 #include <LibDevTools/Actors/WalkerActor.h>
 #include <LibDevTools/DevToolsDelegate.h>
@@ -16,14 +17,15 @@
 
 namespace DevTools {
 
-NonnullRefPtr<InspectorActor> InspectorActor::create(DevToolsServer& devtools, String name, WeakPtr<TabActor> tab)
+NonnullRefPtr<InspectorActor> InspectorActor::create(DevToolsServer& devtools, String name, WeakPtr<TabActor> tab, WeakPtr<StyleSheetsActor> style_sheets)
 {
-    return adopt_ref(*new InspectorActor(devtools, move(name), move(tab)));
+    return adopt_ref(*new InspectorActor(devtools, move(name), move(tab), move(style_sheets)));
 }
 
-InspectorActor::InspectorActor(DevToolsServer& devtools, String name, WeakPtr<TabActor> tab)
+InspectorActor::InspectorActor(DevToolsServer& devtools, String name, WeakPtr<TabActor> tab, WeakPtr<StyleSheetsActor> style_sheets)
     : Actor(devtools, move(name))
     , m_tab(move(tab))
+    , m_style_sheets(move(style_sheets))
 {
 }
 
@@ -91,6 +93,38 @@ void InspectorActor::received_dom_tree(JsonObject& response, JsonObject dom_tree
     response.set("walker"sv, move(walker));
 }
 
+void InspectorActor::on_navigation_started()
+{
+    if (auto walker = m_walker.strong_ref())
+        walker->document_unloaded();
+    if (auto tab = m_tab.strong_ref())
+        tab->reset_selected_node();
+}
+
+void InspectorActor::on_navigation_finished()
+{
+    auto walker = m_walker.strong_ref();
+    auto tab = m_tab.strong_ref();
+    if (!walker || !tab)
+        return;
+
+    devtools().delegate().inspect_tab(tab->description(),
+        weak_callback(*this, [walker](auto&, auto dom_tree) {
+            if (dom_tree.is_error()) {
+                dbgln_if(DEVTOOLS_DEBUG, "Error inspecting tab after navigation: {}", dom_tree.error());
+                return;
+            }
+
+            auto value = dom_tree.release_value();
+            if (!WalkerActor::is_suitable_for_dom_inspection(value)) {
+                dbgln_if(DEVTOOLS_DEBUG, "Did not receive a suitable DOM tree: {}", value);
+                return;
+            }
+
+            walker->replace_dom_tree(move(value.as_object()));
+        }));
+}
+
 RefPtr<TabActor> InspectorActor::tab_for(WeakPtr<InspectorActor> const& weak_inspector)
 {
     if (auto inspector = weak_inspector.strong_ref())
@@ -102,6 +136,13 @@ RefPtr<WalkerActor> InspectorActor::walker_for(WeakPtr<InspectorActor> const& we
 {
     if (auto inspector = weak_inspector.strong_ref())
         return inspector->m_walker.strong_ref();
+    return {};
+}
+
+RefPtr<StyleSheetsActor> InspectorActor::style_sheets_for(WeakPtr<InspectorActor> const& weak_inspector)
+{
+    if (auto inspector = weak_inspector.strong_ref())
+        return inspector->m_style_sheets.strong_ref();
     return {};
 }
 

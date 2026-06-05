@@ -230,7 +230,7 @@ JS::Object* Internals::hit_test(double x, double y)
     //       for stacking context traversal, might not exist if this call occurs between the tear_down_layout_tree()
     //       and update_layout() calls
     active_document.update_layout(DOM::UpdateLayoutReason::InternalsHitTest);
-    auto result = active_document.paintable_box()->hit_test({ x, y }, Painting::HitTestType::Exact);
+    auto result = active_document.hit_test({ x, y }, Painting::HitTestType::Exact);
     if (result.has_value()) {
         auto hit_testing_result = JS::Object::create(realm(), nullptr);
         hit_testing_result->define_direct_property("node"_utf16_fly_string, result->dom_node(), JS::default_attributes);
@@ -294,9 +294,9 @@ void Internals::send_text(HTML::HTMLElement& target, String const& text, WebIDL:
 
     for (auto code_point : text.code_points()) {
         if (auto data = webdriver_key_to_key_code(code_point); data.has_value())
-            page.handle_keydown(data->key_code, modifiers | data->additional_modifiers, data->code_point_to_send, false);
+            page.handle_keydown(data->key_code, modifiers | data->additional_modifiers, data->code_point_to_send, false, data->code_point_to_send != 0);
         else
-            page.handle_keydown(UIEvents::code_point_to_key_code(code_point), modifiers, code_point, false);
+            page.handle_keydown(UIEvents::code_point_to_key_code(code_point), modifiers, code_point, false, true);
     }
 }
 
@@ -305,7 +305,7 @@ void Internals::send_key(HTML::HTMLElement& target, String const& key_name, WebI
     auto key_code = UIEvents::key_code_from_string(key_name);
     target.focus();
 
-    page().handle_keydown(key_code, modifiers, 0, false);
+    page().handle_keydown(key_code, modifiers, 0, false, false);
 }
 
 void Internals::paste(HTML::HTMLElement& target, Utf16String const& text)
@@ -318,7 +318,7 @@ void Internals::paste(HTML::HTMLElement& target, Utf16String const& text)
 
 void Internals::commit_text()
 {
-    page().handle_keydown(UIEvents::Key_Return, 0, 0x0d, false);
+    page().handle_keydown(UIEvents::Key_Return, 0, 0x0d, false, true);
 }
 
 UIEvents::MouseButton Internals::button_from_unsigned_short(WebIDL::UnsignedShort button)
@@ -591,6 +591,11 @@ String Internals::dump_display_list()
     return window().associated_document().dump_display_list();
 }
 
+String Internals::dump_accessibility_tree()
+{
+    return window().associated_document().dump_accessibility_tree_as_json();
+}
+
 String Internals::dump_layout_tree(GC::Ref<DOM::Node> node)
 {
     node->document().update_layout(DOM::UpdateLayoutReason::Debugging);
@@ -792,8 +797,7 @@ static Optional<AsyncScrollingStateSnapshot> capture_async_scrolling_state(DOM::
     auto document_paintable = document.paintable();
     if (!navigable || !document_paintable)
         return {};
-    Painting::DisplayListResourceStorage resource_storage;
-    auto display_list = document.record_display_list(HTML::PaintConfig {}, resource_storage);
+    auto display_list = document.record_display_list(HTML::PaintConfig {}, navigable->display_list_resource_storage());
     if (!display_list)
         return {};
     return AsyncScrollingStateSnapshot {

@@ -26,6 +26,7 @@ class QTimer;
 namespace Ladybird {
 
 class BrowserWindow;
+class WindowControlButton;
 
 class HyperlinkLabel final : public QLabel {
     Q_OBJECT
@@ -78,8 +79,13 @@ public:
     QMenu* context_menu() const { return m_context_menu; }
 
     QToolButton* hamburger_button() const { return m_hamburger_button; }
+    QWidget* toolbar_container() const { return m_toolbar_container; }
 
+    void set_vertical_tabs_enabled(bool);
     void set_window(BrowserWindow&);
+    void set_toolbar_container_in_tab_layout(bool);
+    void set_toolbar_window_controls_visible(bool);
+    void update_window_control_icons();
     void update_hover_label();
 
     bool url_is_hidden() const { return m_location_edit->url_is_hidden(); }
@@ -97,10 +103,13 @@ signals:
 private:
     virtual void resizeEvent(QResizeEvent*) override;
     virtual bool event(QEvent*) override;
+
+    virtual void show_menu_bar_changed() override;
     virtual void config_variable_changed(WebView::ConfigVariableID) override;
 
     void recreate_toolbar_icons();
     void connect_hamburger_menu();
+    void update_hamburger_menu();
     void update_chrome_style();
     void update_tab_title();
     void set_loading(bool);
@@ -109,6 +118,13 @@ private:
 
     QWidget* m_toolbar_container { nullptr };
     QWidget* m_toolbar { nullptr };
+    QWidget* m_toolbar_window_controls_separator { nullptr };
+    QWidget* m_toolbar_window_controls { nullptr };
+    QSpacerItem* m_toolbar_window_controls_spacer { nullptr };
+    QSpacerItem* m_sidebar_toggle_navigation_spacer { nullptr };
+    WindowControlButton* m_minimize_window_button { nullptr };
+    WindowControlButton* m_maximize_window_button { nullptr };
+    WindowControlButton* m_close_window_button { nullptr };
     BookmarksBar* m_bookmarks_bar { nullptr };
     QToolButton* m_hamburger_button { nullptr };
     LocationEdit* m_location_edit { nullptr };
@@ -130,6 +146,7 @@ private:
     QMenu* m_media_context_menu { nullptr };
     QMenu* m_select_dropdown { nullptr };
 
+    QAction* m_toggle_vertical_tabs_expanded_action { nullptr };
     QAction* m_navigate_back_action { nullptr };
     QAction* m_navigate_forward_action { nullptr };
     QAction* m_reload_action { nullptr };

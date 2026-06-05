@@ -602,11 +602,9 @@ Optional<StyleProperty> CSSStyleProperties::get_direct_property(PropertyNameAndI
         if (abstract_element.document().element_needs_style_update(abstract_element))
             abstract_element.document().update_style_for_element(abstract_element);
 
-        // Size container queries need layout to resolve. Avoid forcing layout for every getComputedStyle() call in
-        // a scope with size queries; only elements that actually matched a potentially relevant rule need the
-        // post-layout style.
-        bool const needs_layout_for_container_queries = abstract_element.style_scope().have_size_container_queries()
-            && abstract_element.element().style_depends_on_size_container_query()
+        // Container queries and container-relative units need layout to resolve. Avoid forcing layout for every
+        // getComputedStyle() call; only elements that actually depend on a query container need the post-layout style.
+        bool const needs_layout_for_container_queries = abstract_element.element().style_depends_on_size_container_query()
             && !abstract_element.document().layout_is_up_to_date();
         if (needs_layout_for_container_queries) {
             abstract_element.document().update_layout(DOM::UpdateLayoutReason::ResolvedCSSStyleDeclarationProperty);
@@ -1065,17 +1063,13 @@ RefPtr<StyleValue const> CSSStyleProperties::style_value_for_computed_property(L
         // https://www.w3.org/TR/css-grid-2/#resolved-track-list-standalone
         if (property_id == PropertyID::GridTemplateColumns) {
             if (auto first_paintable = layout_node.first_paintable(); auto const* paintable_box = as_if<Painting::PaintableBox>(first_paintable.ptr())) {
-                if (auto const* grid_layout_data = paintable_box->grid_layout_data()) {
-                    if (auto const& resolved_grid_template_columns = grid_layout_data->resolved_grid_template_columns)
-                        return resolved_grid_template_columns;
-                }
+                if (auto used_values_for_grid_template_columns = paintable_box->used_values_for_grid_template_columns())
+                    return used_values_for_grid_template_columns;
             }
         } else if (property_id == PropertyID::GridTemplateRows) {
             if (auto first_paintable = layout_node.first_paintable(); auto const* paintable_box = as_if<Painting::PaintableBox>(first_paintable.ptr())) {
-                if (auto const* grid_layout_data = paintable_box->grid_layout_data()) {
-                    if (auto const& resolved_grid_template_rows = grid_layout_data->resolved_grid_template_rows)
-                        return resolved_grid_template_rows;
-                }
+                if (auto used_values_for_grid_template_rows = paintable_box->used_values_for_grid_template_rows())
+                    return used_values_for_grid_template_rows;
             }
         }
 

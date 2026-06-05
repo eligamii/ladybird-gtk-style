@@ -82,6 +82,7 @@
 #include <LibWeb/DOM/AdoptedStyleSheets.h>
 #include <LibWeb/DOM/Attr.h>
 #include <LibWeb/DOM/CDATASection.h>
+#include <LibWeb/DOM/CaretPosition.h>
 #include <LibWeb/DOM/Comment.h>
 #include <LibWeb/DOM/CustomEvent.h>
 #include <LibWeb/DOM/DOMImplementation.h>
@@ -190,6 +191,7 @@
 #include <LibWeb/Painting/DisplayList.h>
 #include <LibWeb/Painting/DisplayListCommand.h>
 #include <LibWeb/Painting/DisplayListRecorder.h>
+#include <LibWeb/Painting/HitTestDisplayList.h>
 #include <LibWeb/Painting/PaintableBox.h>
 #include <LibWeb/Painting/StackingContext.h>
 #include <LibWeb/Painting/ViewportPaintable.h>
@@ -1651,6 +1653,10 @@ static void relayout_svg_root(Layout::SVGSVGBox& svg_root)
             if (auto paintable = svg_graphics_ancestor->paintable_box())
                 layout_state.populate_from_paintable(*svg_graphics_ancestor, *paintable);
         }
+        if (auto const* svg_svg_ancestor = as_if<Layout::SVGSVGBox>(*ancestor)) {
+            if (auto paintable = svg_svg_ancestor->paintable_box())
+                layout_state.populate_from_paintable(*svg_svg_ancestor, *paintable);
+        }
     }
 
     // Pre-populate the viewport for position:fixed elements inside <foreignObject>.
@@ -1773,7 +1779,11 @@ void Document::update_layout(UpdateLayoutReason reason)
     for (size_t layout_pass = 0; layout_pass < max_container_query_layout_passes; ++layout_pass) {
         update_style();
 
-        if (layout_is_up_to_date())
+        auto const should_collect_devtools_layout_data = page().client().has_active_devtools_client();
+        auto const force_devtools_layout_data_collection = should_collect_devtools_layout_data
+            && reason == UpdateLayoutReason::InspectDevToolsLayoutData;
+
+        if (layout_is_up_to_date() && !force_devtools_layout_data_collection)
             return;
 
         auto svg_roots_to_relayout = move(m_svg_roots_needing_relayout);
@@ -1860,6 +1870,7 @@ void Document::update_layout(UpdateLayoutReason reason)
 
         Layout::LayoutState layout_state;
         layout_state.ensure_capacity(layout_index_counter);
+        layout_state.set_should_collect_devtools_layout_data(should_collect_devtools_layout_data);
 
         {
             auto& viewport = static_cast<Layout::Viewport&>(*m_layout_root);
@@ -1955,6 +1966,22 @@ void Document::update_layout(UpdateLayoutReason reason)
     }
 
     VERIFY(layout_is_up_to_date());
+}
+
+void Document::clear_devtools_layout_inspection_data()
+{
+    clear_grid_highlighted_node(nullptr);
+    clear_flexbox_highlighted_node(nullptr);
+
+    auto paintable = this->paintable();
+    if (!paintable)
+        return;
+
+    paintable->for_each_in_subtree_of_type<Painting::PaintableBox>([](auto& paintable_box) {
+        paintable_box.set_grid_layout_data(nullptr);
+        paintable_box.set_flex_layout_data(nullptr);
+        return TraversalDecision::Continue;
+    });
 }
 
 bool Document::layout_is_up_to_date() const
@@ -2795,7 +2822,7 @@ static CSSPixelPoint compute_mouse_event_offset(CSSPixelPoint position, Painting
 {
     auto inverse_transform_point = [](Painting::PaintableBox const& paintable_box, CSSPixelPoint position) -> Optional<CSSPixelPoint> {
         auto viewport_paintable = paintable_box.document().unsafe_paintable();
-        if (!viewport_paintable)
+        if (!viewport_paintable || !viewport_paintable->has_visual_context_tree())
             return {};
         auto pixel_ratio = static_cast<float>(paintable_box.document().page().client().device_pixels_per_css_pixel());
         auto const& visual_context_tree = viewport_paintable->visual_context_tree();
@@ -2806,15 +2833,11 @@ static CSSPixelPoint compute_mouse_event_offset(CSSPixelPoint position, Painting
 
     CSSPixelPoint offset_position = position;
     if (auto const* paintable_box = as_if<Painting::PaintableBox>(paintable)) {
-        if (paintable_box->accumulated_visual_context_index().value()) {
-            if (auto transformed_position = inverse_transform_point(*paintable_box, position); transformed_position.has_value())
-                offset_position = *transformed_position;
-        }
+        if (auto transformed_position = inverse_transform_point(*paintable_box, position); transformed_position.has_value())
+            offset_position = *transformed_position;
     } else if (auto containing_block = paintable.containing_block()) {
-        if (containing_block->accumulated_visual_context_index().value()) {
-            if (auto transformed_position = inverse_transform_point(*containing_block, position); transformed_position.has_value())
-                offset_position = *transformed_position;
-        }
+        if (auto transformed_position = inverse_transform_point(*containing_block, position); transformed_position.has_value())
+            offset_position = *transformed_position;
     }
 
     auto const top_left_of_layout_node = paintable.box_type_agnostic_position();
@@ -3524,8 +3547,8 @@ DocumentType const* Document::doctype() const
 
 String const& Document::compat_mode() const
 {
-    static String const back_compat = "BackCompat"_string;
-    static String const css1_compat = "CSS1Compat"_string;
+    static String const& back_compat = *new String("BackCompat"_string);
+    static String const& css1_compat = *new String("CSS1Compat"_string);
 
     if (m_quirks_mode == QuirksMode::Yes)
         return back_compat;
@@ -5828,6 +5851,8 @@ GC::Ref<DOM::Document> Document::appropriate_template_contents_owner_document()
 
 String Document::dump_accessibility_tree_as_json()
 {
+    update_layout(UpdateLayoutReason::InspectAccessibilityTree);
+
     StringBuilder builder;
     auto accessibility_tree = AccessibilityTreeNode::create(this, nullptr);
     build_accessibility_tree(*&accessibility_tree);
@@ -7143,15 +7168,13 @@ Element const* Document::element_from_point(double x, double y)
     // 2. If there is a box in the viewport that would be a target for hit testing at coordinates x,y, when applying the transforms
     //    that apply to the descendants of the viewport, return the associated element and terminate these steps.
     GC::Ptr<Element> hit_element;
-    if (auto paintable_box = this->paintable_box()) {
-        (void)paintable_box->hit_test(position, Painting::HitTestType::Exact, [&](Painting::HitTestResult result) {
-            if (auto* element = as_if<Element>(result.dom_node())) {
-                hit_element = element;
-                return TraversalDecision::Break;
-            }
-            return TraversalDecision::Continue;
-        });
-    }
+    (void)hit_test_all(position, [&](Painting::HitTestResult result) {
+        if (auto* element = as_if<Element>(result.dom_node())) {
+            hit_element = element;
+            return TraversalDecision::Break;
+        }
+        return TraversalDecision::Continue;
+    });
     if (hit_element) {
         // AD-HOC: If element is inside a UA internal shadow root, retarget to the host.
         return retarget_from_ua_internal_shadow_root(*hit_element);
@@ -7186,18 +7209,17 @@ GC::RootVector<GC::Ref<Element>> Document::elements_from_point(double x, double 
     // 3. For each box in the viewport, in paint order, starting with the topmost box, that would be a target for
     //    hit testing at coordinates x,y even if nothing would be overlapping it, when applying the transforms that
     //    apply to the descendants of the viewport, append the associated element to sequence.
-    if (auto paintable_box = this->paintable_box()) {
-        (void)paintable_box->hit_test(position, Painting::HitTestType::Exact, [&](Painting::HitTestResult result) {
-            if (auto* element = as_if<Element>(result.dom_node())) {
-                // AD-HOC: If element is inside a UA internal shadow root, retarget to the host.
-                element = retarget_from_ua_internal_shadow_root(*element);
-                // AD-HOC: Avoid adding duplicates when multiple internal elements retarget to the same host.
-                if (sequence.is_empty() || sequence.last() != element)
-                    sequence.append(*element);
-            }
-            return TraversalDecision::Continue;
-        });
-    }
+    (void)hit_test_all(position, [&](Painting::HitTestResult result) {
+        if (auto* element = as_if<Element>(result.dom_node())) {
+            // AD-HOC: If element is inside a UA internal shadow root, retarget to the host.
+            element = retarget_from_ua_internal_shadow_root(*element);
+            // AD-HOC: Avoid adding duplicates when multiple boxes resolve to the same element, or when multiple
+            // internal elements retarget to the same host.
+            if (!sequence.contains_slow(GC::Ref { *element }))
+                sequence.append(*element);
+        }
+        return TraversalDecision::Continue;
+    });
 
     // 4. If the document has a root element, and the last item in sequence is not the root element,
     //    append the root element to sequence.
@@ -7206,6 +7228,60 @@ GC::RootVector<GC::Ref<Element>> Document::elements_from_point(double x, double 
 
     // 5. Return sequence.
     return sequence;
+}
+
+static bool shadow_root_is_allowed_for_caret_position(ShadowRoot const& shadow_root, Bindings::CaretPositionFromPointOptions const& options)
+{
+    for (auto const& allowed_shadow_root : options.shadow_roots) {
+        if (shadow_root.is_shadow_including_inclusive_ancestor_of(allowed_shadow_root))
+            return true;
+    }
+    return false;
+}
+
+// https://drafts.csswg.org/cssom-view/#dom-document-caretpositionfrompoint
+GC::Ptr<CaretPosition> Document::caret_position_from_point(double x, double y, Bindings::CaretPositionFromPointOptions const& options)
+{
+    // 1. If there is no viewport associated with the document, return null.
+    // 2. If either argument is negative, x is greater than the viewport width excluding the size of a rendered scroll
+    //    bar (if any), or y is greater than the viewport height excluding the size of a rendered scroll bar (if any),
+    //    return null.
+    auto viewport_rect = this->viewport_rect();
+    CSSPixelPoint position { x, y };
+    // FIXME: This should account for the size of the scroll bar.
+    if (x < 0 || y < 0 || position.x() > viewport_rect.width() || position.y() > viewport_rect.height())
+        return nullptr;
+
+    // Ensure the layout tree exists prior to hit testing.
+    update_layout(UpdateLayoutReason::DocumentCaretPositionFromPoint);
+
+    // 3. If at the coordinates x,y in the viewport no text insertion point indicator would have been inserted when
+    //    applying the transforms that apply to the descendants of the viewport, return null.
+    auto caret_position = caret_position_from_point(position);
+    if (!caret_position.has_value())
+        return nullptr;
+
+    // FIXME: 4. If at the coordinates x,y in the viewport a text insertion point indicator would have been inserted
+    //           in a text entry widget which is also a replaced element, when applying the transforms that apply to
+    //           the descendants of the viewport, return a caret position for the text entry widget.
+
+    // 5. Otherwise, retarget shadow tree positions whose roots are not allowed by options.shadowRoots.
+    auto start_node = caret_position->boundary.node;
+    auto start_offset = caret_position->boundary.offset;
+    auto* shadow_root = as_if<ShadowRoot>(start_node->root());
+    while (shadow_root && !shadow_root_is_allowed_for_caret_position(*shadow_root, options)) {
+        auto* host = shadow_root->host();
+        auto* host_parent = host->parent();
+        if (!host_parent)
+            return nullptr;
+        start_offset = host->index();
+        start_node = *host_parent;
+        shadow_root = as_if<ShadowRoot>(start_node->root());
+    }
+
+    return CaretPosition::create(realm(), start_node, start_offset, caret_position->debug_rect.map([](auto const& rect) {
+        return rect.template to_type<float>();
+    }));
 }
 
 // https://drafts.csswg.org/cssom-view/#dom-document-scrollingelement
@@ -7588,11 +7664,11 @@ Optional<String> Document::get_style_sheet_source(CSS::StyleSheetIdentifier cons
             if (auto* node = Node::from_unique_id(*identifier.dom_element_unique_id)) {
                 if (node->is_html_style_element()) {
                     if (auto* sheet = as<HTML::HTMLStyleElement>(*node).sheet())
-                        return sheet->source_text({});
+                        return sheet->source_text();
                 }
                 if (node->is_svg_style_element()) {
                     if (auto* sheet = as<SVG::SVGStyleElement>(*node).sheet())
-                        return sheet->source_text({});
+                        return sheet->source_text();
                 }
             }
         }
@@ -7607,7 +7683,7 @@ Optional<String> Document::get_style_sheet_source(CSS::StyleSheetIdentifier cons
         if (m_style_sheets) {
             for (auto& style_sheet : m_style_sheets->sheets()) {
                 if (auto match = find_style_sheet_with_url(identifier.url.value(), style_sheet); match.has_value())
-                    return match->source_text({});
+                    return match->source_text();
             }
         }
 
@@ -7618,7 +7694,7 @@ Optional<String> Document::get_style_sheet_source(CSS::StyleSheetIdentifier cons
                     return;
 
                 if (auto match = find_style_sheet_with_url(identifier.url.value(), style_sheet); match.has_value())
-                    result = match->source_text({});
+                    result = match->source_text();
             });
             return result;
         }
@@ -8239,6 +8315,12 @@ void Document::reset_cursor_blink_cycle()
         m_cursor_blink_timer->restart();
 }
 
+void Document::set_cursor_position_needs_repaint()
+{
+    if (auto position = cursor_position())
+        position->node()->set_needs_repaint();
+}
+
 // https://html.spec.whatwg.org/multipage/document-sequences.html#doc-container-document
 GC::Ptr<DOM::Document> Document::container_document() const
 {
@@ -8299,6 +8381,7 @@ void Document::set_needs_repaint(InvalidateDisplayList should_invalidate_display
 
 void Document::set_needs_to_record_display_list()
 {
+    m_hit_test_display_list = nullptr;
     if (auto navigable = this->navigable())
         navigable->set_needs_to_record_display_list();
 }
@@ -8345,7 +8428,8 @@ RefPtr<Painting::DisplayList> Document::record_display_list(HTML::PaintConfig co
 
     display_list_recorder.fill_rect(bitmap_rect, background_color);
 
-    Web::DisplayListRecordingContext context(display_list_recorder, page().palette(), page().client().device_pixels_per_css_pixel(), page().chrome_metrics());
+    auto hit_test_display_list = Painting::HitTestDisplayList::create(paintable()->visual_context_tree().version());
+    Web::DisplayListRecordingContext context(display_list_recorder, page().palette(), page().client().device_pixels_per_css_pixel(), page().chrome_metrics(), hit_test_display_list.ptr());
     context.set_device_viewport_rect(viewport_rect);
     context.set_should_show_line_box_borders(config.should_show_line_box_borders);
     context.set_should_paint_overlay(config.paint_overlay);
@@ -8381,7 +8465,122 @@ RefPtr<Painting::DisplayList> Document::record_display_list(HTML::PaintConfig co
         paintable_box->paint_grid_inspector_overlay(context, grid_highlight.options);
     }
 
+    if (config.should_show_caret_hit_test_debug_overlay && m_caret_hit_test_debug_rect.has_value()) {
+        auto caret_rect = context.enclosing_device_rect(*m_caret_hit_test_debug_rect).to_type<int>();
+        auto caret_x = caret_rect.x();
+        auto caret_top = caret_rect.y();
+        auto caret_bottom = caret_rect.bottom();
+        auto marker_color = Color::Magenta;
+
+        display_list_recorder.draw_line({ caret_x, caret_top }, { caret_x, caret_bottom }, marker_color, 2);
+        display_list_recorder.draw_line({ caret_x - 4, caret_top }, { caret_x + 4, caret_top }, marker_color, 2);
+        display_list_recorder.draw_line({ caret_x - 4, caret_bottom }, { caret_x + 4, caret_bottom }, marker_color, 2);
+    }
+
+    m_hit_test_display_list = move(hit_test_display_list);
     return display_list;
+}
+
+void Document::set_caret_hit_test_debug_rect(Optional<CSSPixelRect> rect)
+{
+    if (m_caret_hit_test_debug_rect == rect)
+        return;
+
+    m_caret_hit_test_debug_rect = rect;
+    set_needs_repaint(InvalidateDisplayList::Yes);
+    page().client().request_frame();
+}
+
+Painting::HitTestDisplayList const* Document::ensure_hit_test_display_list()
+{
+    update_paint_and_hit_testing_properties_if_needed();
+
+    auto viewport_paintable = paintable();
+    if (!viewport_paintable)
+        return nullptr;
+
+    auto rebuild_hit_test_display_list = [&] {
+        set_needs_to_record_display_list();
+        HTML::PaintConfig paint_config { .paint_overlay = true };
+        if (auto navigable = this->navigable()) {
+            if (navigable->record_display_list_and_scroll_state(paint_config))
+                return;
+            (void)record_display_list(paint_config, navigable->display_list_resource_storage());
+            return;
+        }
+        Painting::DisplayListResourceStorage resource_storage;
+        (void)record_display_list(paint_config, resource_storage);
+    };
+
+    if (!m_hit_test_display_list || m_hit_test_display_list->visual_context_tree_version() != viewport_paintable->visual_context_tree().version())
+        rebuild_hit_test_display_list();
+
+    return m_hit_test_display_list.ptr();
+}
+
+Optional<Painting::HitTestResult> Document::hit_test(CSSPixelPoint position, Painting::HitTestType type)
+{
+    auto hit_test_display_list = ensure_hit_test_display_list();
+    auto viewport_paintable = paintable();
+    if (!hit_test_display_list || !viewport_paintable)
+        return {};
+    viewport_paintable->refresh_scroll_state();
+    auto result = hit_test_display_list->hit_test(position, type, *viewport_paintable, page().client().device_pixels_per_css_pixel(), page().chrome_metrics());
+    auto has_dom_node_for_event_dispatch = [](Painting::Paintable& paintable) {
+        for (auto const* current = &paintable; current; current = current->parent()) {
+            if (current->dom_node())
+                return true;
+        }
+        return false;
+    };
+    if (result.has_value() && (result->chrome_widget || has_dom_node_for_event_dispatch(result->paintable)))
+        return result;
+
+    if (auto* body_element = body(); body_element && body_element->paintable())
+        return Painting::HitTestResult { .paintable = *body_element->paintable() };
+    if (auto* root_element = document_element(); root_element && root_element->paintable())
+        return Painting::HitTestResult { .paintable = *root_element->paintable() };
+    return {};
+}
+
+Optional<Painting::CaretPosition> Document::caret_position_from_point(CSSPixelPoint position)
+{
+    auto hit_test_display_list = ensure_hit_test_display_list();
+    auto viewport_paintable = paintable();
+    if (!hit_test_display_list || !viewport_paintable)
+        return {};
+    viewport_paintable->refresh_scroll_state();
+    return hit_test_display_list->caret_position_from_point(position, *viewport_paintable, page().client().device_pixels_per_css_pixel(), page().chrome_metrics(), Painting::CaretPositionMode::Normal);
+}
+
+Optional<Painting::CaretPosition> Document::caret_position_from_point_for_selection_start(CSSPixelPoint position)
+{
+    auto hit_test_display_list = ensure_hit_test_display_list();
+    auto viewport_paintable = paintable();
+    if (!hit_test_display_list || !viewport_paintable)
+        return {};
+    viewport_paintable->refresh_scroll_state();
+    return hit_test_display_list->caret_position_from_point(position, *viewport_paintable, page().client().device_pixels_per_css_pixel(), page().chrome_metrics(), Painting::CaretPositionMode::SelectionStart);
+}
+
+Optional<Painting::CaretPosition> Document::caret_position_from_point_for_selection(CSSPixelPoint position)
+{
+    auto hit_test_display_list = ensure_hit_test_display_list();
+    auto viewport_paintable = paintable();
+    if (!hit_test_display_list || !viewport_paintable)
+        return {};
+    viewport_paintable->refresh_scroll_state();
+    return hit_test_display_list->caret_position_from_point(position, *viewport_paintable, page().client().device_pixels_per_css_pixel(), page().chrome_metrics(), Painting::CaretPositionMode::Selection);
+}
+
+TraversalDecision Document::hit_test_all(CSSPixelPoint position, Function<TraversalDecision(Painting::HitTestResult)> const& callback)
+{
+    auto hit_test_display_list = ensure_hit_test_display_list();
+    auto viewport_paintable = paintable();
+    if (!hit_test_display_list || !viewport_paintable)
+        return TraversalDecision::Continue;
+    viewport_paintable->refresh_scroll_state();
+    return hit_test_display_list->hit_test_all(position, *viewport_paintable, page().client().device_pixels_per_css_pixel(), page().chrome_metrics(), callback);
 }
 
 Unicode::Segmenter& Document::grapheme_segmenter() const
@@ -8718,7 +8917,7 @@ String Document::dump_display_list()
     if (!viewport_paintable)
         return "No paintable"_string;
 
-    Painting::DisplayListResourceStorage resource_storage;
+    auto& resource_storage = navigable()->display_list_resource_storage();
     auto display_list = record_display_list(HTML::PaintConfig {}, resource_storage);
     if (!display_list)
         return "No display list"_string;
@@ -8726,8 +8925,7 @@ String Document::dump_display_list()
     HashMap<size_t, RefPtr<Painting::PaintableBox const>> context_id_to_paintable;
     viewport_paintable->for_each_in_inclusive_subtree_of_type<Painting::PaintableBox>([&](auto const& paintable_box) {
         auto visual_context_index = paintable_box.accumulated_visual_context_index();
-        if (visual_context_index.value())
-            (void)context_id_to_paintable.try_set(visual_context_index.value(), paintable_box);
+        (void)context_id_to_paintable.try_set(visual_context_index.value(), paintable_box);
         return TraversalDecision::Continue;
     });
 
@@ -8740,15 +8938,15 @@ String Document::dump_display_list()
     Vector<size_t> root_contexts;
 
     display_list->for_each_command_header([&](Painting::DisplayListCommandHeader const& header, ReadonlyBytes) {
-        if (!header.context_index.value())
-            return;
-        for (size_t node_index = header.context_index.value(); node_index && !visited.contains(node_index);) {
+        for (size_t node_index = header.context_index.value(); !visited.contains(node_index);) {
             visited.set(node_index);
+            if (node_index == Painting::VISUAL_VIEWPORT_NODE_INDEX.value()) {
+                if (!root_contexts.contains_slow(node_index))
+                    root_contexts.append(node_index);
+                break;
+            }
             auto parent = visual_context_tree.node_at(Painting::VisualContextIndex(node_index)).parent_index.value();
-            if (parent)
-                children.ensure(parent).append(node_index);
-            else if (!root_contexts.contains_slow(node_index))
-                root_contexts.append(node_index);
+            children.ensure(parent).append(node_index);
             node_index = parent;
         }
     });

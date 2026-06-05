@@ -44,7 +44,7 @@ public:
 private:
     explicit Application();
 
-    virtual NonnullOwnPtr<Core::EventLoop> create_platform_event_loop() override;
+    virtual Core::EventLoop& create_platform_event_loop() override;
 
     virtual Optional<WebView::ViewImplementation&> active_web_view() const override;
     virtual Optional<WebView::ViewImplementation&> open_blank_new_tab(Web::HTML::ActivateTab) const override;
@@ -60,7 +60,6 @@ private:
     virtual bool should_capture_web_content_output() const override { return false; }
 
     virtual void rebuild_bookmarks_menu() const override;
-    virtual void update_bookmarks_bar_display(bool) const override;
 
     virtual void on_devtools_enabled() const override;
     virtual void on_devtools_disabled() const override;

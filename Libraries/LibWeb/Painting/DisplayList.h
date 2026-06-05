@@ -29,41 +29,6 @@
 
 namespace Web::Painting {
 
-class DisplayListCommandSequence {
-public:
-    static constexpr size_t command_alignment = 16;
-
-    ReadonlyBytes command_bytes() const { return m_command_bytes.span(); }
-
-    template<typename SpanType, typename Callback>
-    static void for_each_command_header(SpanType command_bytes, Callback callback)
-    {
-        static_assert(IsSame<SpanType, Bytes> || IsSame<SpanType, ReadonlyBytes>);
-        for (size_t offset = 0; offset < command_bytes.size();) {
-            VERIFY(offset + sizeof(DisplayListCommandHeader) <= command_bytes.size());
-            auto header = read_display_list_object<DisplayListCommandHeader>(command_bytes.slice(offset));
-            offset += sizeof(header);
-            VERIFY(offset + header.payload_size <= command_bytes.size());
-            auto payload = SpanType { command_bytes.data() + offset, header.payload_size };
-            offset += header.payload_size;
-            callback(header, payload);
-        }
-    }
-
-    template<typename Callback>
-    void for_each_command_header(Callback callback) const
-    {
-        for_each_command_header(command_bytes(), move(callback));
-    }
-
-private:
-    friend class DisplayList;
-    DisplayListCommandSequence();
-
-    DisplayListResourceStorage m_resource_storage;
-    ByteBuffer m_command_bytes;
-};
-
 class WEB_API DisplayListPlayer {
 public:
     virtual ~DisplayListPlayer() = default;
@@ -125,6 +90,7 @@ private:
     virtual void compositor_scroll_node(CompositorScrollNode const&) = 0;
     virtual void compositor_sticky_area(CompositorStickyArea const&) = 0;
     virtual void compositor_wheel_hit_test_target(CompositorWheelHitTestTarget const&) = 0;
+    virtual void compositor_wheel_hit_test_target_with_corner_radii(CompositorWheelHitTestTargetWithCornerRadii const&) = 0;
     virtual void compositor_main_thread_wheel_event_region(CompositorMainThreadWheelEventRegion const&) = 0;
     virtual void compositor_viewport_scrollbar(CompositorViewportScrollbar const&) = 0;
     virtual void compositor_blocking_wheel_event_region(CompositorBlockingWheelEventRegion const&) = 0;
@@ -176,20 +142,31 @@ public:
     void set_async_scrolling_metadata(AsyncScrollingMetadata metadata) { m_async_scrolling_metadata = metadata; }
     Optional<AsyncScrollingMetadata> const& async_scrolling_metadata() const { return m_async_scrolling_metadata; }
 
-    template<typename Callback>
-    static void for_each_command_header(ReadonlyBytes command_bytes, Callback callback)
+    static constexpr size_t command_alignment = 16;
+
+    template<typename SpanType, typename Callback>
+    static void for_each_command_header(SpanType command_bytes, Callback callback)
     {
-        DisplayListCommandSequence::for_each_command_header(command_bytes, move(callback));
+        static_assert(IsSame<SpanType, Bytes> || IsSame<SpanType, ReadonlyBytes>);
+        for (size_t offset = 0; offset < command_bytes.size();) {
+            VERIFY(offset + sizeof(DisplayListCommandHeader) <= command_bytes.size());
+            auto header = read_display_list_object<DisplayListCommandHeader>(command_bytes.slice(offset));
+            offset += sizeof(header);
+            VERIFY(offset + header.payload_size <= command_bytes.size());
+            auto payload = SpanType { command_bytes.data() + offset, header.payload_size };
+            offset += header.payload_size;
+            callback(header, payload);
+        }
     }
 
     template<typename Callback>
     void for_each_command_header(Callback callback) const
     {
-        DisplayListCommandSequence::for_each_command_header(command_bytes(), move(callback));
+        for_each_command_header(command_bytes(), move(callback));
     }
 
-    void append_command_sequence(DisplayListCommandSequence const&, AccumulatedVisualContextTree const&, VisualContextIndex, DisplayListResourceStorage&);
-    DisplayListCommandSequence copy_command_sequence_from(size_t command_start_offset, DisplayListResourceStorage const&) const;
+    void append_command_sequence(ReadonlyBytes, AccumulatedVisualContextTree const&, VisualContextIndex);
+    ByteBuffer copy_command_bytes_from(size_t command_start_offset) const;
     size_t command_byte_size() const { return m_command_bytes.size(); }
 
 private:

@@ -72,6 +72,10 @@ public:
     static Requests::RequestClient& request_server_client() { return *the().m_request_server_client; }
     static ImageDecoderClient::Client& image_decoder_client() { return *the().m_image_decoder_client; }
 
+    virtual bool supports_vertical_tabs() const { return false; }
+    virtual bool supports_server_side_window_decorations() const { return false; }
+    void tab_settings_changed(Badge<ApplicationSettingsObserver>);
+
     static BookmarkStore& bookmark_store() { return the().m_bookmark_store; }
     static HistoryStore& history_store() { return *the().m_history_store; }
     void update_bookmark_action_for_current_web_view();
@@ -92,9 +96,11 @@ public:
 #endif
 
     ErrorOr<NonnullRefPtr<WebContentClient>> launch_web_content_process(ViewImplementation&);
+    u64 allocate_page_id();
+    Web::Compositor::CompositorContextId allocate_compositor_context_id();
     ErrorOr<void> connect_web_content_to_compositor(WebContentClient&);
-    void register_compositor_context(WebContentClient&, Web::Compositor::CompositorContextId, Optional<u64> page_id, Web::Compositor::PagePresentationRegistration);
-    ErrorOr<void> try_register_compositor_context(WebContentClient&, Web::Compositor::CompositorContextId, Optional<u64> page_id, Web::Compositor::PagePresentationRegistration);
+    void register_compositor_context(WebContentClient&, Web::Compositor::CompositorContextId, Optional<u64> page_id);
+    ErrorOr<void> try_register_compositor_context(WebContentClient&, Web::Compositor::CompositorContextId, Optional<u64> page_id);
     void update_compositor_viewport(Web::Compositor::CompositorContextId, Gfx::IntSize viewport_size, Web::Compositor::WindowResizingInProgress = Web::Compositor::WindowResizingInProgress::No);
     void update_compositor_display_metadata(Web::Compositor::CompositorContextId, Optional<u64> display_id, double refresh_rate);
     bool send_async_scroll_to_compositor(Web::Compositor::CompositorContextId, Gfx::FloatPoint position, Gfx::FloatPoint delta_in_device_pixels);
@@ -175,6 +181,10 @@ public:
     Menu& contrast_menu() { return *m_contrast_menu; }
     Menu& motion_menu() { return *m_motion_menu; }
 
+    Action& toggle_vertical_tabs_expanded_action() { return *m_toggle_vertical_tabs_expanded_action; }
+
+    Action& toggle_menu_bar_action() { return *m_toggle_menu_bar_action; }
+
     Menu& bookmarks_menu() { return *m_bookmarks_menu; }
     Menu& bookmarks_bar_context_menu() { return *m_bookmarks_bar_context_menu; }
     Menu& bookmark_context_menu() { return *m_bookmark_context_menu; }
@@ -203,12 +213,13 @@ protected:
 
     virtual void create_platform_arguments(Core::ArgsParser&) { }
     virtual void create_platform_options(BrowserOptions&, RequestServerOptions&, WebContentOptions&) { }
-    virtual NonnullOwnPtr<Core::EventLoop> create_platform_event_loop();
+    virtual Core::EventLoop& create_platform_event_loop();
 
     virtual Optional<ByteString> ask_user_for_download_path([[maybe_unused]] StringView file) const { return {}; }
 
+    virtual void update_tabs_display() const { }
+
     virtual void rebuild_bookmarks_menu() const { }
-    virtual void update_bookmarks_bar_display([[maybe_unused]] bool show_bookmarks_bar) const { }
     virtual void on_recently_closed_entries_changed() const { }
 
     struct BookmarkID {
@@ -231,19 +242,20 @@ protected:
     Main::Arguments& arguments() { return m_arguments; }
 
 private:
+    ErrorOr<NonnullRefPtr<WebContentClient>> create_web_content_client(Optional<ViewImplementation&>, u64 initial_page_id);
     ErrorOr<void> launch_services();
     void launch_spare_web_content_process();
     ErrorOr<void> launch_compositor_process();
     void handle_compositor_process_death();
     void recover_compositor_process();
+    void crash_compositor_process();
     ErrorOr<void> launch_request_server();
     ErrorOr<void> launch_image_decoder_server();
     ErrorOr<void> launch_devtools_server();
     ErrorOr<void> load_content_blocker_lists();
 
     void initialize_actions();
-
-    void update_bookmarks_bar_action();
+    void update_vertical_tabs_action();
 
     struct MenuData {
         Menu& menu;
@@ -254,11 +266,14 @@ private:
 
     virtual Vector<DevTools::TabDescription> tab_list() const override;
     virtual Vector<DevTools::CSSProperty> css_property_list() const override;
+    virtual void navigate_tab(DevTools::TabDescription const&, String const&) const override;
+    virtual void reload_tab(DevTools::TabDescription const&, bool) const override;
+    virtual void traverse_the_history_by_delta(DevTools::TabDescription const&, int) const override;
     virtual void inspect_tab(DevTools::TabDescription const&, OnTabInspectionComplete) const override;
     virtual void inspect_accessibility_tree(DevTools::TabDescription const&, OnAccessibilityTreeInspectionComplete) const override;
     virtual void listen_for_dom_properties(DevTools::TabDescription const&, OnDOMNodePropertiesReceived) const override;
     virtual void stop_listening_for_dom_properties(DevTools::TabDescription const&) const override;
-    virtual void inspect_dom_node(DevTools::TabDescription const&, DOMNodeProperties::Type, Web::UniqueNodeID, Optional<Web::CSS::PseudoElement>) const override;
+    virtual void inspect_dom_node(DevTools::TabDescription const&, DOMNodeProperties::Type, Web::UniqueNodeID, Optional<Web::CSS::PseudoElement>, JsonObject options = {}) const override;
     virtual void clear_inspected_dom_node(DevTools::TabDescription const&) const override;
     virtual void start_node_picker(DevTools::TabDescription const&, OnNodePickerEvent) const override;
     virtual void stop_node_picker(DevTools::TabDescription const&) const override;
@@ -327,6 +342,7 @@ private:
 
     RefPtr<WebContentClient> m_spare_web_content_process;
     bool m_has_queued_task_to_launch_spare_web_content_process { false };
+    u64 m_next_page_or_compositor_context_id { 1 };
 
     RefPtr<Database::Database> m_database;
     RefPtr<Database::Database> m_history_database;
@@ -336,7 +352,7 @@ private:
 
     OwnPtr<Core::TimeZoneWatcher> m_time_zone_watcher;
 
-    OwnPtr<Core::EventLoop> m_event_loop;
+    Core::EventLoop* m_event_loop { nullptr };
     OwnPtr<ProcessManager> m_process_manager;
 
     RefPtr<Action> m_reload_action;
@@ -360,6 +376,10 @@ private:
     RefPtr<Menu> m_motion_menu;
     Web::CSS::PreferredMotion m_motion { Web::CSS::PreferredMotion::Auto };
 
+    RefPtr<Action> m_toggle_vertical_tabs_expanded_action;
+
+    RefPtr<Action> m_toggle_menu_bar_action;
+
     RefPtr<Menu> m_bookmarks_menu;
     RefPtr<Action> m_toggle_bookmark_action;
     RefPtr<Action> m_toggle_bookmark_bar_action;
@@ -375,6 +395,7 @@ private:
 
     RefPtr<Menu> m_debug_menu;
     RefPtr<Action> m_show_line_box_borders_action;
+    RefPtr<Action> m_show_caret_hit_test_debug_overlay_action;
     RefPtr<Action> m_enable_scripting_action;
     RefPtr<Action> m_enable_content_blocking_action;
     RefPtr<Action> m_block_pop_ups_action;

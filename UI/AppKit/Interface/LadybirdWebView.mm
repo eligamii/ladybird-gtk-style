@@ -51,6 +51,24 @@ static Optional<u64> display_id_for_screen(NSScreen* screen)
     return static_cast<u64>([screen_number unsignedLongLongValue]);
 }
 
+static bool is_browser_reserved_key_equivalent(NSEvent* event)
+{
+    auto modifiers = event.modifierFlags & (NSEventModifierFlagCommand | NSEventModifierFlagControl | NSEventModifierFlagOption | NSEventModifierFlagShift);
+    if (modifiers != NSEventModifierFlagCommand)
+        return false;
+
+    auto* characters = [[event charactersIgnoringModifiers] lowercaseString];
+    if ([characters length] != 1)
+        return false;
+
+    unichar character = [characters characterAtIndex:0];
+    return character == 'l'
+        || character == 'n'
+        || character == 'q'
+        || character == 't'
+        || character == 'w';
+}
+
 static Web::DevicePixelPoint node_picker_position_for(Ladybird::WebViewBridge const& web_view_bridge, Web::DevicePixelPoint widget_position)
 {
     return {
@@ -934,7 +952,7 @@ static Web::DevicePixelPoint node_picker_position_for(Ladybird::WebViewBridge co
     };
 }
 
-- (void)handleCurrentKeyDownEvent
+- (void)handleCurrentKeyDownEvent:(BOOL)shouldInsertText
 {
     if (!self.current_key_down_event)
         return;
@@ -944,7 +962,7 @@ static Web::DevicePixelPoint node_picker_position_for(Ladybird::WebViewBridge co
         return;
     }
 
-    auto key_event = Ladybird::ns_event_to_key_event(Web::KeyEvent::Type::KeyDown, self.current_key_down_event);
+    auto key_event = Ladybird::ns_event_to_key_event(Web::KeyEvent::Type::KeyDown, self.current_key_down_event, shouldInsertText);
     m_web_view_bridge->enqueue_input_event(move(key_event));
 
     self.current_key_down_event = nil;
@@ -1282,6 +1300,9 @@ static Web::DevicePixelPoint node_picker_position_for(Ladybird::WebViewBridge co
     if (self.event_being_redispatched == event) {
         return NO;
     }
+    if (is_browser_reserved_key_equivalent(event)) {
+        return NO;
+    }
 
     [self keyDown:event];
     return YES;
@@ -1375,12 +1396,12 @@ static Web::DevicePixelPoint node_picker_position_for(Ladybird::WebViewBridge co
 
 - (void)insertText:(id)string replacementRange:(NSRange)replacementRange
 {
-    [self handleCurrentKeyDownEvent];
+    [self handleCurrentKeyDownEvent:YES];
 }
 
 - (void)doCommandBySelector:(SEL)selector
 {
-    [self handleCurrentKeyDownEvent];
+    [self handleCurrentKeyDownEvent:NO];
 }
 
 - (BOOL)hasMarkedText

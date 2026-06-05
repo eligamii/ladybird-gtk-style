@@ -6,8 +6,9 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/Assertions.h>
 #include <AK/Badge.h>
-#include <AK/Vector.h>
+#include <AK/Platform.h>
 #include <LibCore/EventLoop.h>
 #include <LibCore/EventLoopImplementation.h>
 #include <LibCore/EventReceiver.h>
@@ -18,17 +19,10 @@ namespace Core {
 
 namespace {
 
-OwnPtr<Vector<EventLoop&>>& event_loop_stack_uninitialized()
+EventLoop*& current_event_loop()
 {
-    thread_local OwnPtr<Vector<EventLoop&>> s_event_loop_stack = nullptr;
-    return s_event_loop_stack;
-}
-Vector<EventLoop&>& event_loop_stack()
-{
-    auto& the_stack = event_loop_stack_uninitialized();
-    if (the_stack == nullptr)
-        the_stack = make<Vector<EventLoop&>>();
-    return *the_stack;
+    thread_local EventLoop* s_current_event_loop = nullptr;
+    return s_current_event_loop;
 }
 
 }
@@ -36,31 +30,32 @@ Vector<EventLoop&>& event_loop_stack()
 EventLoop::EventLoop()
     : m_impl(EventLoopManager::the().make_implementation())
 {
-    if (event_loop_stack().is_empty()) {
-        event_loop_stack().append(*this);
-    }
+    VERIFY(!current_event_loop());
+    current_event_loop() = this;
 }
 
 EventLoop::~EventLoop()
 {
     if (m_weak)
         m_weak->revoke();
-    if (!event_loop_stack().is_empty() && &event_loop_stack().last() == this) {
-        event_loop_stack().take_last();
-    }
+    if (current_event_loop() == this)
+        current_event_loop() = nullptr;
+}
+
+EventLoop& EventLoop::initialize_for_current_thread()
+{
+    return *new EventLoop;
 }
 
 bool EventLoop::is_running()
 {
-    auto& stack = event_loop_stack_uninitialized();
-    return stack != nullptr && !stack->is_empty();
+    return current_event_loop() != nullptr;
 }
 
 EventLoop& EventLoop::current()
 {
-    if (event_loop_stack().is_empty())
-        dbgln("No EventLoop is present, unable to return current one!");
-    return event_loop_stack().last();
+    VERIFY(current_event_loop());
+    return *current_event_loop();
 }
 
 NonnullRefPtr<WeakEventLoopReference> EventLoop::current_weak()
@@ -81,33 +76,22 @@ bool EventLoop::was_exit_requested()
     return m_impl->was_exit_requested();
 }
 
-struct EventLoopPusher {
-public:
-    EventLoopPusher(EventLoop& event_loop)
-    {
-        event_loop_stack().append(event_loop);
-    }
-    ~EventLoopPusher()
-    {
-        event_loop_stack().take_last();
-    }
-};
-
 int EventLoop::exec()
 {
-    EventLoopPusher pusher(*this);
+    VERIFY(current_event_loop() == this);
     return m_impl->exec();
 }
 
 void EventLoop::spin_until(Function<bool()> goal_condition)
 {
-    EventLoopPusher pusher(*this);
+    VERIFY(current_event_loop() == this);
     while (!goal_condition())
         pump();
 }
 
 size_t EventLoop::pump(WaitMode mode)
 {
+    VERIFY(current_event_loop() == this);
     return m_impl->pump(mode == WaitMode::WaitForEvents ? EventLoopImplementation::PumpMode::WaitForEvents : EventLoopImplementation::PumpMode::DontWaitForEvents);
 }
 

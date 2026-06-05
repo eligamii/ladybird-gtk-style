@@ -19,11 +19,11 @@ namespace Web::WebAssembly {
 
 GC_DEFINE_ALLOCATOR(Module);
 
-WebIDL::ExceptionOr<GC::Ref<Module>> Module::construct_impl(JS::Realm& realm, GC::Ref<WebIDL::BufferSource> bytes)
+WebIDL::ExceptionOr<GC::Ref<Module>> Module::construct_impl(JS::Realm& realm, WebIDL::BufferSource bytes)
 {
     auto& vm = realm.vm();
 
-    auto stable_bytes_or_error = WebIDL::get_buffer_source_copy(bytes->raw_object());
+    auto stable_bytes_or_error = WebIDL::get_buffer_source_copy(bytes);
     if (stable_bytes_or_error.is_error()) {
         VERIFY(stable_bytes_or_error.error().code() == ENOMEM);
         return vm.throw_completion<JS::InternalError>(vm.error_message(JS::VM::ErrorMessage::OutOfMemory));
@@ -35,11 +35,11 @@ WebIDL::ExceptionOr<GC::Ref<Module>> Module::construct_impl(JS::Realm& realm, GC
 }
 
 // https://webassembly.github.io/threads/js-api/index.html#dom-module-imports
-WebIDL::ExceptionOr<Vector<ModuleImportDescriptor>> Module::imports(JS::VM&, GC::Ref<Module> module_object)
+WebIDL::ExceptionOr<Vector<Bindings::ModuleImportDescriptor>> Module::imports(JS::VM&, GC::Ref<Module> module_object)
 {
     // 1. Let module be moduleObject.[[Module]].
     // 2. Let imports be « ».
-    Vector<ModuleImportDescriptor> import_objects;
+    Vector<Bindings::ModuleImportDescriptor> import_objects;
 
     // 3. For each (moduleName, name, type) of module_imports(module),
     auto& imports = module_object->m_compiled_module->module->import_section().imports();
@@ -60,10 +60,10 @@ WebIDL::ExceptionOr<Vector<ModuleImportDescriptor>> Module::imports(JS::VM&, GC:
             [](Wasm::TagType) -> Bindings::ImportExportKind { TODO(); });
 
         // 3.2. Let obj be «[ "module" → moduleName, "name" → name, "kind" → kind ]».
-        ModuleImportDescriptor descriptor {
+        Bindings::ModuleImportDescriptor descriptor {
+            .kind = kind,
             .module = String::from_utf8_with_replacement_character(import.module()),
             .name = String::from_utf8_with_replacement_character(import.name()),
-            .kind = kind,
         };
 
         // 3.3. Append obj to imports.
@@ -74,11 +74,11 @@ WebIDL::ExceptionOr<Vector<ModuleImportDescriptor>> Module::imports(JS::VM&, GC:
 }
 
 // https://webassembly.github.io/threads/js-api/index.html#dom-module-exports
-WebIDL::ExceptionOr<Vector<ModuleExportDescriptor>> Module::exports(JS::VM&, GC::Ref<Module> module_object)
+WebIDL::ExceptionOr<Vector<Bindings::ModuleExportDescriptor>> Module::exports(JS::VM&, GC::Ref<Module> module_object)
 {
     // 1. Let module be moduleObject.[[Module]].
     // 2. Let exports be « ».
-    Vector<ModuleExportDescriptor> export_objects;
+    Vector<Bindings::ModuleExportDescriptor> export_objects;
 
     // 3. For each (name, type) of module_exports(module),
     auto& exports = module_object->m_compiled_module->module->export_section().entries();
@@ -97,9 +97,9 @@ WebIDL::ExceptionOr<Vector<ModuleExportDescriptor>> Module::exports(JS::VM&, GC:
             [](Wasm::GlobalIndex) { return Bindings::ImportExportKind::Global; },
             [](Wasm::TagIndex) -> Bindings::ImportExportKind { TODO(); });
         // 3.2. Let obj be «[ "name" → name, "kind" → kind ]».
-        ModuleExportDescriptor descriptor {
-            .name = String::from_utf8_with_replacement_character(entry.name()),
+        Bindings::ModuleExportDescriptor descriptor {
             .kind = kind,
+            .name = String::from_utf8_with_replacement_character(entry.name()),
         };
         // 3.3. Append obj to exports.
         export_objects.append(move(descriptor));

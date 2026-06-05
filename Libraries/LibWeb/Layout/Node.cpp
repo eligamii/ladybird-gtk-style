@@ -57,8 +57,17 @@ Node::Node(DOM::Document& document, DOM::Node* node, AttachToDOMNode attach_to_d
 
 Node::~Node() = default;
 
+static void invalidate_paint_caches(Node& node)
+{
+    for (auto& paintable : node.paintables()) {
+        if (auto* paintable_box = as_if<Painting::PaintableBox>(*paintable))
+            paintable_box->invalidate_paint_cache();
+    }
+}
+
 void Node::prepare_for_detach_from_layout_tree()
 {
+    invalidate_paint_caches(*this);
     if (auto* node_with_style = as_if<NodeWithStyle>(*this))
         node_with_style->clear_image_observers();
     if (auto* image_box = as_if<ImageBox>(*this))
@@ -717,11 +726,12 @@ void NodeWithStyle::apply_style(CSS::ComputedProperties const& computed_style)
     // NOTE: color must be set after color-scheme to ensure currentColor can be resolved in other properties (e.g. background-color).
     // NOTE: color must be set after font_size as `CalculatedStyleValue`s can rely on it being set for resolving lengths.
     computed_values.set_color(computed_style.color(CSS::PropertyID::Color, CSS::ColorResolutionContext::for_layout_node_with_style(*this)));
-    // NOTE: Currently there are still discussions about `accentColor` and `currentColor` interactions, so the line below might need changing in the future
-    computed_values.set_accent_color(computed_style.accent_color(CSS::ColorResolutionContext::for_layout_node_with_style(*this)));
+
     // NOTE: This color resolution context must be created after we set color above so that currentColor resolves correctly
     // FIXME: We should resolve colors to their absolute forms at compute time (i.e. by implementing the relevant absolutized methods)
     auto color_resolution_context = CSS::ColorResolutionContext::for_layout_node_with_style(*this);
+
+    computed_values.set_accent_color(computed_style.accent_color(color_resolution_context));
 
     computed_values.set_vertical_align(computed_style.vertical_align());
 
@@ -731,6 +741,13 @@ void NodeWithStyle::apply_style(CSS::ComputedProperties const& computed_style)
         const_cast<CSS::AbstractImageStyleValue&>(*layer.background_image).load_any_resources(*this);
 
     computed_values.set_background_layers(move(background_layers));
+
+    auto mask_layers = computed_style.mask_layers();
+
+    for (auto const& layer : mask_layers)
+        const_cast<CSS::AbstractImageStyleValue&>(*layer.background_image).load_any_resources(*this);
+
+    computed_values.set_mask_layers(move(mask_layers));
 
     computed_values.set_background_color(computed_style.color(CSS::PropertyID::BackgroundColor, color_resolution_context));
     computed_values.set_background_color_clip(computed_style.background_color_clip());
@@ -956,7 +973,7 @@ void NodeWithStyle::apply_style(CSS::ComputedProperties const& computed_style)
     computed_values.set_shape_rendering(computed_style.shape_rendering());
     computed_values.set_paint_order(computed_style.paint_order());
 
-    // FIXME: We should actually support more than one mask image rather than just using the first
+    // FIXME: We should support SVG mask references in every mask layer rather than just using the first.
     auto const& mask_image = [&] -> CSS::StyleValue const& {
         auto const& value = computed_style.property(CSS::PropertyID::MaskImage);
 
@@ -1320,6 +1337,7 @@ void Node::add_paintable(RefPtr<Painting::Paintable> paintable)
 
 void Node::clear_paintables()
 {
+    invalidate_paint_caches(*this);
     for (auto& paintable : m_paintable) {
         if (paintable->parent())
             paintable->remove();
