@@ -871,6 +871,37 @@ GC::Ptr<Layout::NodeWithStyle> Element::create_layout_node_for_display_type(DOM:
     return document.heap().allocate<Layout::InlineNode>(document, element, move(style));
 }
 
+void Element::apply_presentational_hints(Vector<CSS::StyleProperty>& properties) const
+{
+    // https://html.spec.whatwg.org/multipage/rendering.html#the-page
+    // When a body element has a link attribute, its value is expected to be parsed using the rules for parsing a legacy
+    // color value, and if that does not return failure, the user agent is expected to treat the attribute as a
+    // presentational hint setting the 'color' property of any element in the Document matching the :link pseudo-class
+    // to the resulting color.
+    if (matches_link_pseudo_class()) {
+        if (auto const& link_color = document().normal_link_color(); link_color.has_value())
+            properties.append({ .property_id = CSS::PropertyID::Color, .value = CSS::ColorStyleValue::create_from_color(*link_color, CSS::ColorSyntax::Legacy) });
+    }
+
+    // When a body element has a vlink attribute, its value is expected to be parsed using the rules for parsing a
+    // legacy color value, and if that does not return failure, the user agent is expected to treat the attribute as a
+    // presentational hint setting the 'color' property of any element in the Document matching the :visited
+    // pseudo-class to the resulting color.
+    if (matches_visited_pseudo_class()) {
+        if (auto const& visited_link_color = document().visited_link_color(); visited_link_color.has_value())
+            properties.append({ .property_id = CSS::PropertyID::Color, .value = CSS::ColorStyleValue::create_from_color(*visited_link_color, CSS::ColorSyntax::Legacy) });
+    }
+
+    // When a body element has an alink attribute, its value is expected to be parsed using the rules for parsing a
+    // legacy color value, and if that does not return failure, the user agent is expected to treat the attribute as a
+    // presentational hint setting the 'color' property of any element in the Document matching the :active pseudo-class
+    // and either the :link pseudo-class or the :visited pseudo-class to the resulting color.
+    if (is_being_activated() && (matches_link_pseudo_class() || matches_visited_pseudo_class())) {
+        if (auto const& active_link_color = document().active_link_color(); active_link_color.has_value())
+            properties.append({ .property_id = CSS::PropertyID::Color, .value = CSS::ColorStyleValue::create_from_color(*active_link_color, CSS::ColorSyntax::Legacy) });
+    }
+}
+
 void Element::run_attribute_change_steps(FlyString const& local_name, Optional<String> const& old_value, Optional<String> const& value, Optional<FlyString> const& namespace_)
 {
     attribute_changed(local_name, old_value, value, namespace_);
@@ -1613,6 +1644,9 @@ Vector<CSSPixelRect> Element::get_client_rects() const
     // NOTE: Ensure that layout is up-to-date before looking at metrics.
     const_cast<Document&>(document()).update_layout_if_needed_for_node(*this, UpdateLayoutReason::ElementGetClientRects);
 
+    if (!layout_node())
+        return {};
+
     // NOTE: Make sure CSS transforms are resolved before they are used to calculate the rect position.
     const_cast<Document&>(document()).update_paint_and_hit_testing_properties_if_needed();
 
@@ -1780,6 +1814,11 @@ void Element::removed_from(IsSubtreeRoot is_subtree_root, Node* old_ancestor, No
 
     play_or_cancel_animations_after_display_property_change();
     exit_fullscreen_on_element_removal();
+
+    m_computed_properties = nullptr;
+    for_each_synthetic_pseudo_element([&](CSS::PseudoElement pseudo_element_type, SyntheticPseudoElement&) {
+        set_computed_properties(pseudo_element_type, nullptr);
+    });
 }
 
 void Element::moved_from(IsSubtreeRoot is_subtree_root, GC::Ptr<Node> old_ancestor)
@@ -1827,22 +1866,6 @@ GC::Ptr<Layout::NodeWithStyle> Element::pseudo_element_unsafe_layout_node(CSS::P
     if (auto element_data = get_pseudo_element(pseudo_element); element_data.has_value())
         return element_data->unsafe_layout_node();
     return nullptr;
-}
-
-bool Element::affected_by_pseudo_class(CSS::PseudoClass pseudo_class) const
-{
-    if (m_computed_properties && m_computed_properties->has_attempted_match_against_pseudo_class(pseudo_class)) {
-        return true;
-    }
-    if (m_pseudo_element_data) {
-        for (auto& pseudo_element : *m_pseudo_element_data) {
-            if (!pseudo_element.value->computed_properties())
-                continue;
-            if (pseudo_element.value->computed_properties()->has_attempted_match_against_pseudo_class(pseudo_class))
-                return true;
-        }
-    }
-    return false;
 }
 
 // https://html.spec.whatwg.org/multipage/semantics-other.html#selector-enabled
@@ -1929,6 +1952,30 @@ bool Element::matches_link_pseudo_class() const
     return has_attribute(HTML::AttributeNames::href);
 }
 
+// https://drafts.csswg.org/selectors/#visited-pseudo
+bool Element::matches_visited_pseudo_class() const
+{
+    // The :visited pseudo-class comes with obvious privacy implications—​letting random websites know what other
+    // websites you’ve visited can be problematic for a number of reasons—​and so user agents must preserve user
+    // privacy in their implementation of :visited.
+
+    // NOTE: This specification intentionally does not specify exactly how to preserve user privacy in this regard, to
+    //       allow for user agents to innovate in this space. The following methods are suggested, however:
+    //       - Have :visited never match, so all links match :link instead.
+    //       - Carefully track what history entries could have been observed by a given origin on their own, and only
+    //         have links match :visited if that visit would have been observable from the site’s origin. A possible
+    //         specific approach for this is described in Appendix C: Example Privacy-Preserving :visited Restrictions.
+    //       - Allow links to match :visited on any origin, but carefully restrict what styles they can apply and what
+    //         information is returned by style-querying APIs like getComputedStyle(), to prevent sites from observing
+    //         whether a link is styled with :link or :visited. (This is documented at MDN, and was the historical
+    //         approach browsers took, but is not perfect; there are several ways for a hostile page to still extract
+    //         history information.)
+
+    // FIXME: For simplicity we currently take the first approach and have :visited never match. We may want to rethink
+    //        this in the future.
+    return false;
+}
+
 bool Element::matches_local_link_pseudo_class() const
 {
     // The :local-link pseudo-class allows authors to style hyperlinks based on the users current location
@@ -1985,8 +2032,13 @@ bool Element::has_synthetic_pseudo_elements() const
 void Element::clear_synthetic_pseudo_element_layout_nodes()
 {
     for_each_synthetic_pseudo_element([&](CSS::PseudoElement, SyntheticPseudoElement& pseudo_element) {
-        if (auto layout_node = pseudo_element.layout_node())
+        if (auto layout_node = pseudo_element.layout_node()) {
+            layout_node->for_each_in_inclusive_subtree([](Layout::Node& node) {
+                node.clear_paintables();
+                return TraversalDecision::Continue;
+            });
             layout_node->prepare_subtree_for_detach_from_layout_tree();
+        }
         pseudo_element.set_layout_node(nullptr);
     });
 }
@@ -2801,13 +2853,14 @@ static CSSPixelPoint determine_the_scroll_into_view_position(Element& target, Bi
     // run the following steps:
 
     CSSPixelRect scrolling_box_rect;
-    CSSPixelPoint scroll_offset;
+    CSSPixelPoint current_scroll_position;
     if (scrolling_box.is_document()) {
-        // NOTE: For a viewport scrolling box is initial containing block
-        scrolling_box_rect = scrolling_box.document().viewport_rect();
+        // NOTE: Element::getBoundingClientRect() returns coordinates relative to the viewport.
+        scrolling_box_rect = { {}, scrolling_box.document().viewport_rect().size() };
+        current_scroll_position = scrolling_box.document().navigable()->viewport_scroll_offset();
     } else if (auto paintable_box = scrolling_box.paintable_box()) {
-        scroll_offset = paintable_box->scroll_offset();
-        scrolling_box_rect = paintable_box->absolute_rect().translated(scroll_offset);
+        current_scroll_position = paintable_box->scroll_offset();
+        scrolling_box_rect = paintable_box->absolute_rect();
     } else {
         return {};
     }
@@ -2818,13 +2871,6 @@ static CSSPixelPoint determine_the_scroll_into_view_position(Element& target, Bi
     //    getBoundingClientRect(), if target is an Element, or Range’s getBoundingClientRect(),
     //    if target is a Range.
     auto target_bounding_border_box = target.get_bounding_client_rect();
-
-    // AD-HOC: If scrolling_box is a box, translate target bounding box so that the following math works for both the
-    //         viewport and a regular scrollable box.
-    if (!scrolling_box.is_document()) {
-        target_bounding_border_box.translate_by(scroll_offset);
-        target_bounding_border_box.translate_by(-scrolling_box.paintable_box()->absolute_rect().top_left());
-    }
 
     // AD-HOC: The spec doesn't specify when to do this, but we need to apply scroll-margin and scroll-margin to target
     //         bounding border box (https://drafts.csswg.org/cssom-view-1/#example-51af1565).
@@ -2906,72 +2952,72 @@ static CSSPixelPoint determine_the_scroll_into_view_position(Element& target, Bi
 
     // 10. Let position be the scroll position scrolling box would have by following these steps:
     auto position = [&]() -> CSSPixelPoint {
-        CSSPixels x = 0;
-        CSSPixels y = 0;
+        auto x = current_scroll_position.x();
+        auto y = current_scroll_position.y();
 
         // 1. If block is "start", then align element edge A with scrolling box edge A.
         if (block == Bindings::ScrollLogicalPosition::Start) {
-            y = element_edge_a;
+            y += element_edge_a - scrolling_box_edge_a;
         }
         // 2. Otherwise, if block is "end", then align element edge B with scrolling box edge B.
         else if (block == Bindings::ScrollLogicalPosition::End) {
-            y = element_edge_b - scrolling_box_height;
+            y += element_edge_b - scrolling_box_edge_b;
         }
         // 3. Otherwise, if block is "center", then align the center of target bounding border box with the center of
         //    scrolling box in scrolling box’s block flow direction.
         else if (block == Bindings::ScrollLogicalPosition::Center) {
-            y = element_edge_a + (element_height / 2) - (scrolling_box_height / 2);
+            y += (element_edge_a + element_height / 2) - (scrolling_box_edge_a + scrolling_box_height / 2);
         }
         // 4. Otherwise, block is "nearest":
         else {
             // If element edge A and element edge B are both outside scrolling box edge A and scrolling box edge B
-            if (element_edge_a <= 0 && element_edge_b >= scrolling_box_height) {
+            if (element_edge_a <= scrolling_box_edge_a && element_edge_b >= scrolling_box_edge_b) {
                 // Do nothing.
             }
             // If element edge A is outside scrolling box edge A and element height is less than scrolling box height
             // If element edge B is outside scrolling box edge B and element height is greater than scrolling box height
-            else if ((element_edge_a <= 0 && element_height < scrolling_box_height) || (element_edge_b >= scrolling_box_height && element_height > scrolling_box_height)) {
+            else if ((element_edge_a <= scrolling_box_edge_a && element_height < scrolling_box_height) || (element_edge_b >= scrolling_box_edge_b && element_height > scrolling_box_height)) {
                 // Align element edge A with scrolling box edge A.
-                y = element_edge_a;
+                y += element_edge_a - scrolling_box_edge_a;
             }
             // If element edge A is outside scrolling box edge A and element height is greater than scrolling box height
             // If element edge B is outside scrolling box edge B and element height is less than scrolling box height
-            else if ((element_edge_b >= scrolling_box_height && element_height < scrolling_box_height) || (element_edge_a <= 0 && element_height > scrolling_box_height)) {
+            else if ((element_edge_b >= scrolling_box_edge_b && element_height < scrolling_box_height) || (element_edge_a <= scrolling_box_edge_a && element_height > scrolling_box_height)) {
                 // Align element edge B with scrolling box edge B.
-                y = element_edge_b - scrolling_box_height;
+                y += element_edge_b - scrolling_box_edge_b;
             }
         }
 
         // 5. If inline is "start", then align element edge C with scrolling box edge C.
         if (inline_ == Bindings::ScrollLogicalPosition::Start) {
-            x = element_edge_c;
+            x += element_edge_c - scrolling_box_edge_c;
         }
         // 6. Otherwise, if inline is "end", then align element edge D with scrolling box edge D.
         else if (inline_ == Bindings::ScrollLogicalPosition::End) {
-            x = element_edge_d - scrolling_box_width;
+            x += element_edge_d - scrolling_box_edge_d;
         }
         // 7. Otherwise, if inline is "center", then align the center of target bounding border box with the center of
         //    scrolling box in scrolling box’s inline base direction.
         else if (inline_ == Bindings::ScrollLogicalPosition::Center) {
-            x = element_edge_c + (element_width / 2) - (scrolling_box_width / 2);
+            x += (element_edge_c + element_width / 2) - (scrolling_box_edge_c + scrolling_box_width / 2);
         }
         // 8. Otherwise, inline is "nearest":
         else {
             // If element edge C and element edge D are both outside scrolling box edge C and scrolling box edge D
-            if (element_edge_c <= 0 && element_edge_d >= scrolling_box_width) {
+            if (element_edge_c <= scrolling_box_edge_c && element_edge_d >= scrolling_box_edge_d) {
                 // Do nothing.
             }
             // If element edge C is outside scrolling box edge C and element width is less than scrolling box width
             // If element edge D is outside scrolling box edge D and element width is greater than scrolling box width
-            else if ((element_edge_c <= 0 && element_width < scrolling_box_width) || (element_edge_d >= scrolling_box_width && element_width > scrolling_box_width)) {
+            else if ((element_edge_c <= scrolling_box_edge_c && element_width < scrolling_box_width) || (element_edge_d >= scrolling_box_edge_d && element_width > scrolling_box_width)) {
                 // Align element edge C with scrolling box edge C.
-                x = element_edge_c;
+                x += element_edge_c - scrolling_box_edge_c;
             }
             // If element edge C is outside scrolling box edge C and element width is greater than scrolling box width
             // If element edge D is outside scrolling box edge D and element width is less than scrolling box width
-            else if ((element_edge_d >= scrolling_box_width && element_width < scrolling_box_width) || (element_edge_c <= 0 && element_width > scrolling_box_width)) {
+            else if ((element_edge_d >= scrolling_box_edge_d && element_width < scrolling_box_width) || (element_edge_c <= scrolling_box_edge_c && element_width > scrolling_box_width)) {
                 // Align element edge D with scrolling box edge D.
-                x = element_edge_d - scrolling_box_width;
+                x += element_edge_d - scrolling_box_edge_d;
             }
         }
 
@@ -3033,10 +3079,6 @@ static GC::Ref<WebIDL::Promise> scroll_an_element_into_view(Element& target, Bin
                 //           Add the Promise returned from this step in the set ancestorPromises.
                 (void)behavior;
 
-                // AD-HOC:
-                // NOTE: Since calculated position is relative to the viewport, we need to add the viewport's position to it
-                //       before passing to perform_a_scroll_of_the_viewport() that expects a position relative to the page.
-                position.set_y(position.y() + document.viewport_rect().y());
                 document.navigable()->perform_a_scroll_of_the_viewport(position);
             }
         }

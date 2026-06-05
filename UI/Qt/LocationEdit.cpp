@@ -6,6 +6,7 @@
  */
 
 #include <AK/Debug.h>
+#include <AK/StringView.h>
 #include <LibURL/URL.h>
 #include <LibWebView/Application.h>
 #include <LibWebView/Autocomplete.h>
@@ -23,8 +24,11 @@
 #include <QGuiApplication>
 #include <QKeyEvent>
 #include <QLatin1String>
+#include <QMouseEvent>
+#include <QPainter>
 #include <QPalette>
 #include <QResizeEvent>
+#include <QStyle>
 #if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
 #    include <QStyleHints>
 #endif
@@ -34,6 +38,43 @@
 #include <QVariantAnimation>
 
 namespace Ladybird {
+
+class LocationActionButton final : public QToolButton {
+public:
+    explicit LocationActionButton(QWidget* parent)
+        : QToolButton(parent)
+    {
+    }
+
+private:
+    virtual void paintEvent(QPaintEvent*) override
+    {
+        static constexpr int hover_size = 23;
+        static constexpr int icon_y_offset = -1;
+        static constexpr qreal hover_y_offset = 1.0;
+
+        QPainter painter(this);
+        painter.setRenderHint(QPainter::Antialiasing, true);
+
+        if (isDown() || underMouse()) {
+            auto background = isDown()
+                ? ChromeStyle::mix(ChromeStyle::chrome_surface_pressed(palette()), ChromeStyle::chrome_button_text(palette()), 0.04)
+                : ChromeStyle::mix(ChromeStyle::chrome_surface_hover(palette()), ChromeStyle::chrome_button_text(palette()), 0.04);
+            painter.setPen(Qt::NoPen);
+            painter.setBrush(background);
+            auto hover_rect = QRectF(0, 0, hover_size, hover_size);
+            hover_rect.moveCenter(QPointF(rect().center().x(), rect().center().y() + hover_y_offset));
+            painter.drawRoundedRect(hover_rect, 10, 10);
+        }
+
+        auto icon_rect = QRect(
+            (width() - iconSize().width()) / 2,
+            (height() - iconSize().height()) / 2 + icon_y_offset,
+            iconSize().width(),
+            iconSize().height());
+        icon().paint(&painter, icon_rect, Qt::AlignCenter, isEnabled() ? QIcon::Normal : QIcon::Disabled, isDown() ? QIcon::On : QIcon::Off);
+    }
+};
 
 static QColor location_focus_glow_color(QPalette const& palette, int alpha)
 {
@@ -146,13 +187,20 @@ static bool should_suppress_inline_autocomplete_for_key(QKeyEvent const* event)
     return key == Qt::Key_Backspace || key == Qt::Key_Delete;
 }
 
+static constexpr int LOCATION_TRAILING_EDGE_MARGIN = 12;
+static constexpr int LOCATION_TRAILING_TEXT_GAP = 4;
+static constexpr int LOCATION_TRAILING_ITEM_GAP = 6;
+static constexpr int LOCATION_TRAILING_ACTION_WIDTH = 24;
+static constexpr int LOCATION_TRAILING_ACTION_HEIGHT = 23;
+static constexpr int LOCATION_PILL_HEIGHT = 22;
+static constexpr int LOCATION_PILL_HORIZONTAL_PADDING = 18;
+
 LocationEdit::LocationEdit(QWidget* parent)
     : QLineEdit(parent)
     , m_autocomplete(new Autocomplete(this))
 {
     setObjectName("LadybirdLocationEdit");
-    setMinimumHeight(37);
-    setTextMargins(38, 0, 40, 0);
+    setMinimumHeight(32);
     update_chrome_style();
 
     m_focus_glow_effect = new QGraphicsDropShadowEffect(this);
@@ -170,45 +218,49 @@ LocationEdit::LocationEdit(QWidget* parent)
 
     m_leading_icon_button = new QToolButton(this);
     m_leading_icon_button->setObjectName("LadybirdLocationIcon");
-    m_leading_icon_button->setIconSize({ 20, 20 });
+    m_leading_icon_button->setIconSize({ 18, 18 });
     m_leading_icon_button->setFixedSize(22, 22);
     m_leading_icon_button->setAutoRaise(true);
     m_leading_icon_button->setFocusPolicy(Qt::NoFocus);
     m_leading_icon_button->setCursor(Qt::ArrowCursor);
-    m_leading_icon_button->setToolTip("Search");
+    m_leading_icon_button->hide();
 
-    m_trailing_action_button = new QToolButton(this);
+    m_trailing_action_button = new LocationActionButton(this);
     m_trailing_action_button->setObjectName("LadybirdLocationAction");
-    m_trailing_action_button->setIconSize({ 20, 20 });
-    m_trailing_action_button->setFixedSize(24, 24);
+    m_trailing_action_button->setToolButtonStyle(Qt::ToolButtonIconOnly);
+    m_trailing_action_button->setIconSize({ 17, 17 });
+    m_trailing_action_button->setFixedSize(LOCATION_TRAILING_ACTION_WIDTH, LOCATION_TRAILING_ACTION_HEIGHT);
     m_trailing_action_button->setAutoRaise(true);
     m_trailing_action_button->setFocusPolicy(Qt::NoFocus);
     m_trailing_action_button->setCursor(Qt::ArrowCursor);
     m_trailing_action_button->hide();
 
-    m_loading_animation_timer = new QTimer(this);
-    m_loading_animation_timer->setInterval(80);
-    connect(m_loading_animation_timer, &QTimer::timeout, this, [this] {
-        m_loading_animation_frame = (m_loading_animation_frame + 1) % 12;
-        update_loading_icon();
+    m_zoom_indicator_button = new QToolButton(this);
+    m_zoom_indicator_button->setObjectName("LadybirdLocationZoomIndicator");
+    m_zoom_indicator_button->setToolButtonStyle(Qt::ToolButtonTextOnly);
+    m_zoom_indicator_button->setFixedHeight(LOCATION_PILL_HEIGHT);
+    m_zoom_indicator_button->setAutoRaise(true);
+    m_zoom_indicator_button->setFocusPolicy(Qt::NoFocus);
+    m_zoom_indicator_button->setCursor(Qt::ArrowCursor);
+    m_zoom_indicator_button->hide();
+    connect(m_zoom_indicator_button, &QToolButton::clicked, this, [this] {
+        if (m_zoom_action)
+            m_zoom_action->trigger();
     });
 
+    update_text_margins();
     update_placeholder();
     update_location_icon();
 
     m_autocomplete->on_query_complete = [this](auto suggestions, WebView::AutocompleteResultKind result_kind) {
         int selected_row = apply_inline_autocomplete(suggestions);
 
-        if (result_kind == WebView::AutocompleteResultKind::Intermediate && m_autocomplete->is_visible()) {
-            if (auto selected = m_autocomplete->selected_suggestion(); selected.has_value()) {
-                for (auto const& suggestion : suggestions) {
-                    if (suggestion.text == *selected)
-                        return;
-                }
-            }
-            m_autocomplete->clear_selection();
+        // Do not update the popup while results are still changing.
+        // Intermediate updates are triggered on every keystroke and would
+        // cause visible flicker in the suggestion list.
+        // Only final results are used to refresh the UI.
+        if (result_kind == WebView::AutocompleteResultKind::Intermediate && m_autocomplete->is_visible())
             return;
-        }
 
         m_autocomplete->show_with_suggestions(AK::move(suggestions), selected_row);
     };
@@ -235,10 +287,10 @@ LocationEdit::LocationEdit(QWidget* parent)
         if (text().isEmpty())
             return;
 
+        auto query = ak_string_from_qstring(text());
+
         reset_autocomplete_state();
         clearFocus();
-
-        auto query = ak_string_from_qstring(text());
 
         auto ctrl_held = QApplication::keyboardModifiers() & Qt::ControlModifier;
         auto append_tld = ctrl_held ? WebView::AppendTLD::Yes : WebView::AppendTLD::No;
@@ -289,11 +341,29 @@ void LocationEdit::set_trailing_action(QAction* action)
 {
     m_trailing_action_button->setDefaultAction(action);
     m_trailing_action_button->setVisible(action != nullptr);
+    update_text_margins();
+    update_trailing_item_positions();
 }
 
 QAction* LocationEdit::trailing_action() const
 {
     return m_trailing_action_button->defaultAction();
+}
+
+void LocationEdit::set_zoom_action(QAction* action)
+{
+    if (m_zoom_action == action)
+        return;
+
+    if (m_zoom_action)
+        QObject::disconnect(m_zoom_action, nullptr, this, nullptr);
+
+    m_zoom_action = action;
+
+    if (m_zoom_action)
+        connect(m_zoom_action, &QAction::changed, this, &LocationEdit::update_zoom_indicator);
+
+    update_zoom_indicator();
 }
 
 void LocationEdit::set_url_is_hidden(bool url_is_hidden)
@@ -318,30 +388,52 @@ void LocationEdit::changeEvent(QEvent* event)
 
 void LocationEdit::focusInEvent(QFocusEvent* event)
 {
+    auto should_defer_full_url = event->reason() == Qt::MouseFocusReason
+        && m_url.has_value()
+        && text() == display_url();
+
     QLineEdit::focusInEvent(event);
+
+    m_should_show_full_url_on_mouse_release = should_defer_full_url;
+
+    if (!should_defer_full_url && m_url.has_value() && text() == display_url())
+        setText(serialized_url());
+
     highlight_location();
     animate_focus_glow(58);
 
-    if (event->reason() != Qt::PopupFocusReason)
-        QTimer::singleShot(0, this, &QLineEdit::selectAll);
+    if (event->reason() != Qt::PopupFocusReason && !should_defer_full_url) {
+        QTimer::singleShot(0, this, [this] {
+            if (hasFocus())
+                selectAll();
+        });
+    }
 }
 
 void LocationEdit::focusOutEvent(QFocusEvent* event)
 {
     QLineEdit::focusOutEvent(event);
+
+    if (event->reason() == Qt::PopupFocusReason)
+        return;
+
     animate_focus_glow(0);
 
     reset_autocomplete_state();
     m_autocomplete->cancel_pending_query();
     m_autocomplete->close();
+    m_should_show_full_url_on_mouse_release = false;
 
     if (m_url_is_hidden) {
         m_url_is_hidden = false;
         m_has_user_edited_hidden_url = false;
         if (text().isEmpty() && m_url.has_value())
-            setText(qstring_from_ak_string(m_url->serialize()));
+            setText(display_url());
+    } else if (m_url.has_value() && text() == serialized_url()) {
+        setText(display_url());
     }
 
+    deselect();
     if (event->reason() != Qt::PopupFocusReason) {
         setCursorPosition(0);
         highlight_location();
@@ -373,7 +465,7 @@ void LocationEdit::keyPressEvent(QKeyEvent* event)
             return;
         reset_autocomplete_state();
         if (m_url.has_value())
-            setText(qstring_from_ak_string(m_url->serialize()));
+            setText(serialized_url());
         clearFocus();
         return;
     }
@@ -395,6 +487,9 @@ void LocationEdit::keyPressEvent(QKeyEvent* event)
             m_is_applying_inline_autocomplete = false;
         }
         m_autocomplete->close();
+        emit returnPressed();
+        event->accept();
+        return;
     }
 
     if (should_suppress_inline_autocomplete_for_key(event))
@@ -403,22 +498,58 @@ void LocationEdit::keyPressEvent(QKeyEvent* event)
     QLineEdit::keyPressEvent(event);
 }
 
+void LocationEdit::mouseReleaseEvent(QMouseEvent* event)
+{
+    QLineEdit::mouseReleaseEvent(event);
+
+    if (event->button() == Qt::LeftButton && m_should_show_full_url_on_mouse_release)
+        show_full_url_preserving_display_selection();
+}
+
 void LocationEdit::resizeEvent(QResizeEvent* event)
 {
     QLineEdit::resizeEvent(event);
 
-    auto button_size = m_leading_icon_button->sizeHint();
-    auto y = (height() - button_size.height()) / 2 + 1;
+    update_trailing_item_positions();
+}
+
+void LocationEdit::update_trailing_item_positions()
+{
+    auto button_size = m_leading_icon_button->size();
+    auto y = (height() - button_size.height()) / 2 + (m_leading_icon_button->property("notSecure").toBool() ? 0 : 1);
     m_leading_icon_button->move(12, y);
 
-    auto trailing_button_size = m_trailing_action_button->sizeHint();
-    auto trailing_y = (height() - trailing_button_size.height()) / 2 + 1;
-    m_trailing_action_button->move(width() - trailing_button_size.width() - 12, trailing_y);
+    auto trailing_button_size = m_trailing_action_button->size();
+    auto trailing_x = width() - trailing_button_size.width() - LOCATION_TRAILING_EDGE_MARGIN;
+    auto trailing_y = (height() - trailing_button_size.height()) / 2;
+    m_trailing_action_button->move(trailing_x, trailing_y);
+
+    auto zoom_button_size = m_zoom_indicator_button->size();
+    auto zoom_y = (height() - zoom_button_size.height()) / 2;
+    m_zoom_indicator_button->move(trailing_x - LOCATION_TRAILING_ITEM_GAP - zoom_button_size.width(), zoom_y);
+    m_zoom_indicator_button->raise();
+    m_trailing_action_button->raise();
 }
 
 void LocationEdit::search_engine_changed()
 {
     update_placeholder();
+    update_location_icon();
+}
+
+void LocationEdit::update_text_margins()
+{
+    setTextMargins(m_text_leading_margin, 0, trailing_text_margin(), 0);
+}
+
+int LocationEdit::trailing_text_margin() const
+{
+    auto margin = LOCATION_TRAILING_EDGE_MARGIN + LOCATION_TRAILING_ACTION_WIDTH + LOCATION_TRAILING_TEXT_GAP;
+
+    if (m_zoom_indicator_button && !m_zoom_indicator_button->isHidden())
+        margin += m_zoom_indicator_button->width() + LOCATION_TRAILING_ITEM_GAP;
+
+    return margin;
 }
 
 void LocationEdit::update_chrome_style()
@@ -429,6 +560,7 @@ void LocationEdit::update_chrome_style()
     m_is_updating_chrome_style = true;
     setStyleSheet(ChromeStyle::location_edit_style_sheet(palette()));
     m_is_updating_chrome_style = false;
+    update_zoom_indicator();
 }
 
 void LocationEdit::schedule_chrome_style_update()
@@ -442,6 +574,7 @@ void LocationEdit::schedule_chrome_style_update()
         m_autocomplete->schedule_chrome_style_update();
         update_focus_glow(m_focus_glow_alpha);
         update_location_icon();
+        update_zoom_indicator();
         highlight_location();
         update();
         m_has_pending_chrome_style_update = false;
@@ -463,28 +596,108 @@ void LocationEdit::update_location_icon()
     if (!m_leading_icon_button)
         return;
 
-    if (m_is_loading) {
-        update_loading_icon();
+    auto update_indicator_style = [this](bool not_secure) {
+        if (m_leading_icon_button->property("notSecure").toBool() == not_secure)
+            return;
+
+        m_leading_icon_button->setProperty("notSecure", not_secure);
+        m_leading_icon_button->style()->unpolish(m_leading_icon_button);
+        m_leading_icon_button->style()->polish(m_leading_icon_button);
+    };
+
+    auto position_indicator = [this](int y_offset) {
+        auto button_size = m_leading_icon_button->size();
+        auto y = (height() - button_size.height()) / 2 + y_offset;
+        m_leading_icon_button->move(12, y);
+    };
+
+    auto hide_indicator = [&] {
+        update_indicator_style(false);
+        m_leading_icon_button->hide();
+        m_leading_icon_button->setText({});
+        m_leading_icon_button->setIcon({});
+        m_leading_icon_button->setToolTip({});
+        m_text_leading_margin = 0;
+        update_text_margins();
+    };
+
+    auto show_icon = [&](ChromeIcon icon, QString const& tooltip) {
+        update_indicator_style(false);
+        m_leading_icon_button->setToolButtonStyle(Qt::ToolButtonIconOnly);
+        m_leading_icon_button->setText({});
+        m_leading_icon_button->setIcon(create_chrome_icon(icon, palette()));
+        m_leading_icon_button->setIconSize({ 18, 18 });
+        m_leading_icon_button->setFixedSize(22, 22);
+        m_leading_icon_button->setToolTip(tooltip);
+        m_leading_icon_button->show();
+        position_indicator(1);
+        m_text_leading_margin = 22;
+        update_text_margins();
+    };
+
+    auto show_not_secure_indicator = [&] {
+        update_indicator_style(true);
+        m_leading_icon_button->setToolButtonStyle(Qt::ToolButtonTextOnly);
+        m_leading_icon_button->setIcon({});
+        m_leading_icon_button->setText("Not secure");
+
+        auto width = m_leading_icon_button->fontMetrics().horizontalAdvance("Not secure") + 18;
+        m_leading_icon_button->setFixedSize(width, 22);
+        m_leading_icon_button->setToolTip("Not secure");
+        m_leading_icon_button->show();
+        position_indicator(0);
+        m_text_leading_margin = width;
+        update_text_margins();
+    };
+
+    auto is_showing_current_url_for_display = !hasFocus()
+        && m_url.has_value()
+        && text() == display_url();
+
+    if (text_matches_current_url() || is_showing_current_url_for_display) {
+        auto const& scheme = m_url->scheme();
+        if (scheme == "http"sv)
+            show_not_secure_indicator();
+        else
+            hide_indicator();
         return;
     }
 
-    if (text_matches_current_url()) {
-        m_leading_icon_button->setIcon(m_favicon.isNull() ? create_chrome_icon(ChromeIcon::Globe, palette()) : m_favicon);
-        m_leading_icon_button->setToolTip("Page icon");
-        return;
+    auto query = ak_string_from_qstring(current_query());
+    auto query_view = query.bytes_as_string_view().trim_whitespace();
+    if (query_view.is_empty()) {
+        hide_indicator();
+    } else if (WebView::location_looks_like_url(query_view)) {
+        show_icon(ChromeIcon::Globe, "Go to address");
+    } else if (WebView::Application::settings().search_engine().has_value()) {
+        show_icon(ChromeIcon::Search, "Search");
+    } else {
+        hide_indicator();
     }
-
-    m_leading_icon_button->setIcon(create_chrome_icon(ChromeIcon::Search, palette()));
-    m_leading_icon_button->setToolTip("Search");
 }
 
-void LocationEdit::update_loading_icon()
+void LocationEdit::update_zoom_indicator()
 {
-    if (!m_leading_icon_button)
+    if (!m_zoom_indicator_button)
         return;
 
-    m_leading_icon_button->setIcon(loading_spinner_icon(palette(), m_loading_animation_frame));
-    m_leading_icon_button->setToolTip("Loading");
+    auto visible = m_zoom_action && m_zoom_action->isVisible() && !m_zoom_action->text().isEmpty();
+    if (!visible) {
+        m_zoom_indicator_button->hide();
+        update_text_margins();
+        update_trailing_item_positions();
+        return;
+    }
+
+    m_zoom_indicator_button->setText(m_zoom_action->text());
+    m_zoom_indicator_button->setToolTip(m_zoom_action->toolTip());
+
+    auto width = m_zoom_indicator_button->fontMetrics().horizontalAdvance(m_zoom_indicator_button->text()) + LOCATION_PILL_HORIZONTAL_PADDING;
+    m_zoom_indicator_button->setFixedSize(width, LOCATION_PILL_HEIGHT);
+    m_zoom_indicator_button->show();
+
+    update_text_margins();
+    update_trailing_item_positions();
 }
 
 void LocationEdit::highlight_location()
@@ -492,36 +705,56 @@ void LocationEdit::highlight_location()
     auto url = ak_string_from_qstring(text());
     QList<QInputMethodEvent::Attribute> attributes;
 
-    if (auto url_parts = WebView::break_url_into_parts(url); url_parts.has_value()) {
-        auto darkened_text_color = ChromeStyle::chrome_text(palette());
-        darkened_text_color.setAlpha(127);
+    auto darkened_text_color = ChromeStyle::chrome_text(palette());
+    darkened_text_color.setAlpha(127);
 
-        QTextCharFormat dark_attributes;
-        dark_attributes.setForeground(darkened_text_color);
+    QTextCharFormat dark_attributes;
+    dark_attributes.setForeground(darkened_text_color);
 
-        QTextCharFormat highlight_attributes;
-        highlight_attributes.setForeground(ChromeStyle::chrome_text(palette()));
+    QTextCharFormat highlight_attributes;
+    highlight_attributes.setForeground(ChromeStyle::chrome_text(palette()));
 
+    auto append_attributes = [&](StringView scheme_and_subdomain, StringView effective_tld_plus_one, StringView remainder) {
         attributes.append({
             QInputMethodEvent::TextFormat,
             -cursorPosition(),
-            static_cast<int>(url_parts->scheme_and_subdomain.length()),
+            static_cast<int>(scheme_and_subdomain.length()),
             dark_attributes,
         });
 
         attributes.append({
             QInputMethodEvent::TextFormat,
-            static_cast<int>(url_parts->scheme_and_subdomain.length() - cursorPosition()),
-            static_cast<int>(url_parts->effective_tld_plus_one.length()),
+            static_cast<int>(scheme_and_subdomain.length() - cursorPosition()),
+            static_cast<int>(effective_tld_plus_one.length()),
             highlight_attributes,
         });
 
         attributes.append({
             QInputMethodEvent::TextFormat,
-            static_cast<int>(url_parts->scheme_and_subdomain.length() + url_parts->effective_tld_plus_one.length() - cursorPosition()),
-            static_cast<int>(url_parts->remainder.length()),
+            static_cast<int>(scheme_and_subdomain.length() + effective_tld_plus_one.length() - cursorPosition()),
+            static_cast<int>(remainder.length()),
             dark_attributes,
         });
+    };
+
+    if (m_url.has_value() && text() == display_url() && m_url->scheme().is_one_of("http"sv, "https"sv)) {
+        auto serialized_url = m_url->serialize();
+        if (auto url_parts = WebView::break_url_into_parts(serialized_url); url_parts.has_value()) {
+            auto scheme_and_subdomain = url_parts->scheme_and_subdomain;
+            auto remainder = url_parts->remainder;
+
+            auto scheme_prefix_length = m_url->scheme().bytes_as_string_view().length() + "://"sv.length();
+            if (scheme_and_subdomain.length() >= scheme_prefix_length)
+                scheme_and_subdomain = scheme_and_subdomain.substring_view(scheme_prefix_length);
+            if (scheme_and_subdomain.starts_with("www."sv, CaseSensitivity::CaseInsensitive))
+                scheme_and_subdomain = scheme_and_subdomain.substring_view(4);
+            if (remainder == "/"sv)
+                remainder = {};
+
+            append_attributes(scheme_and_subdomain, url_parts->effective_tld_plus_one, remainder);
+        }
+    } else if (auto url_parts = WebView::break_url_into_parts(url); url_parts.has_value()) {
+        append_attributes(url_parts->scheme_and_subdomain, url_parts->effective_tld_plus_one, url_parts->remainder);
     }
 
     QInputMethodEvent event(QString(), attributes);
@@ -536,40 +769,132 @@ void LocationEdit::set_url(Optional<URL::URL> url)
         if (!m_has_user_edited_hidden_url)
             clear();
     } else if (m_url.has_value()) {
-        setText(qstring_from_ak_string(m_url->serialize()));
+        setText(hasFocus() ? serialized_url() : display_url());
         setCursorPosition(0);
     }
 
     update_location_icon();
 }
 
-void LocationEdit::set_loading(bool is_loading)
+void LocationEdit::show_full_url_preserving_display_selection()
 {
-    if (m_is_loading == is_loading)
+    if (!m_should_show_full_url_on_mouse_release)
         return;
 
-    m_is_loading = is_loading;
-    m_loading_animation_frame = 0;
+    m_should_show_full_url_on_mouse_release = false;
 
-    if (m_is_loading)
-        m_loading_animation_timer->start();
-    else
-        m_loading_animation_timer->stop();
+    if (!m_url.has_value() || text() != display_url())
+        return;
 
-    update_location_icon();
+    auto selection_start = selectionStart();
+    auto selection_length = selectedText().length();
+
+    setText(serialized_url());
+
+    if (selection_start != -1) {
+        auto serialized_selection_start = serialized_url_position_for_display_position(selection_start);
+        auto serialized_selection_end = serialized_url_position_for_display_position(selection_start + selection_length);
+        setSelection(serialized_selection_start, serialized_selection_end - serialized_selection_start);
+    } else {
+        selectAll();
+    }
+
+    highlight_location();
 }
 
-void LocationEdit::set_favicon(QIcon const& favicon)
+int LocationEdit::serialized_url_position_for_display_position(int display_position) const
 {
-    m_favicon = favicon;
-    update_location_icon();
+    VERIFY(m_url.has_value());
+
+    auto display = display_url();
+    auto serialized = serialized_url();
+    display_position = qBound(0, display_position, display.length());
+
+    if (display == serialized || !m_url->scheme().is_one_of("http"sv, "https"sv))
+        return min(display_position, serialized.length());
+
+    int display_index = 0;
+    int last_serialized_position = 0;
+    auto map_visible_range = [&](int serialized_start, int length) -> Optional<int> {
+        if (length <= 0)
+            return {};
+
+        if (display_position < display_index + length)
+            return serialized_start + display_position - display_index;
+
+        display_index += length;
+        last_serialized_position = serialized_start + length;
+        return {};
+    };
+
+    auto serialized_index = qstring_from_ak_string(m_url->scheme()).length() + "://"sv.length();
+
+    if (!m_url->username().is_empty() || !m_url->password().is_empty()) {
+        auto username = qstring_from_ak_string(m_url->username());
+        auto password = qstring_from_ak_string(m_url->password());
+        auto userinfo_length = username.length() + 1;
+        if (!password.isEmpty())
+            userinfo_length += 1 + password.length();
+
+        if (auto position = map_visible_range(serialized_index, userinfo_length); position.has_value())
+            return *position;
+        serialized_index += userinfo_length;
+    }
+
+    auto host = qstring_from_ak_string(m_url->serialized_host());
+    auto host_offset = host.startsWith("www.", Qt::CaseInsensitive) ? 4 : 0;
+    if (auto position = map_visible_range(serialized_index + host_offset, host.length() - host_offset); position.has_value())
+        return *position;
+    serialized_index += host.length();
+
+    if (auto port = m_url->port(); port.has_value()) {
+        auto port_text = QString::number(*port);
+        auto port_length = 1 + port_text.length();
+        if (auto position = map_visible_range(serialized_index, port_length); position.has_value())
+            return *position;
+        serialized_index += port_length;
+    }
+
+    auto path = qstring_from_ak_string(m_url->serialize_path());
+    if (path != "/" || m_url->query().has_value() || m_url->fragment().has_value()) {
+        if (auto position = map_visible_range(serialized_index, path.length()); position.has_value())
+            return *position;
+    }
+    serialized_index += path.length();
+
+    if (m_url->query().has_value()) {
+        auto query_length = 1 + qstring_from_ak_string(*m_url->query()).length();
+        if (auto position = map_visible_range(serialized_index, query_length); position.has_value())
+            return *position;
+        serialized_index += query_length;
+    }
+
+    if (m_url->fragment().has_value()) {
+        auto fragment_length = 1 + qstring_from_ak_string(*m_url->fragment()).length();
+        if (auto position = map_visible_range(serialized_index, fragment_length); position.has_value())
+            return *position;
+    }
+
+    return last_serialized_position;
 }
 
 bool LocationEdit::text_matches_current_url() const
 {
     return m_url.has_value()
         && !m_url_is_hidden
-        && text() == qstring_from_ak_string(m_url->serialize());
+        && (text() == serialized_url() || text() == display_url());
+}
+
+QString LocationEdit::serialized_url() const
+{
+    VERIFY(m_url.has_value());
+    return qstring_from_ak_string(m_url->serialize());
+}
+
+QString LocationEdit::display_url() const
+{
+    VERIFY(m_url.has_value());
+    return qstring_from_ak_string(WebView::url_for_display(*m_url));
 }
 
 QString LocationEdit::current_query() const

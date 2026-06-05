@@ -60,12 +60,15 @@ struct OutputFunctionEntry {
     // with the live address of helper N for the current process.
     u64 reloc_offset;
     u32 reloc_count;
+    u64 trap_offset;
+    u32 trap_count;
     u32 _pad;
 };
 
 struct CodeMapping {
     void* mapping;
     size_t size;
+    Vector<CraneliftTrap> traps;
 };
 
 static constexpr size_t oop_code_region_min_size = 256 * KiB;
@@ -91,7 +94,7 @@ struct BatchInput {
 // any rebuild that changes those will simply miss the cache rather than try to
 // execute incompatible bytes.
 constexpr u64 cache_blob_magic = 0x4354494A4D534157ULL; // "WASMJITC" little-endian
-constexpr u32 cache_blob_format_version = 1;
+constexpr u32 cache_blob_format_version = 3;
 
 struct CacheBlobHeader {
     u64 magic;
@@ -108,7 +111,7 @@ struct CacheBlobFunctionEntry {
     u32 function_index;
     u32 code_size;
     u32 reloc_count;
-    u32 _pad;
+    u32 trap_count;
 };
 static_assert(sizeof(CacheBlobFunctionEntry) == 16);
 
@@ -116,6 +119,7 @@ struct CacheRecord {
     u32 function_index;
     ByteBuffer unpatched_code;
     Vector<HelperReloc> relocs;
+    Vector<CraneliftTrap> traps;
 };
 
 // On a cache miss we capture every successful compile so we can hand the blob to a
@@ -137,8 +141,13 @@ struct CacheState {
     Vector<BatchInput> pending_batch;
 };
 
-static CacheState s_cranelift_cache_state;
 static thread_local u32 s_active_function_index = NumericLimits<u32>::max();
+
+static CacheState& cranelift_cache_state()
+{
+    static thread_local auto* state = new CacheState;
+    return *state;
+}
 
 static u64 compute_layout_hash(RuntimeHelpers const& h)
 {
@@ -183,7 +192,7 @@ static bool apply_helper_relocs(u8* code_bytes, size_t code_size, HelperReloc co
 // helper-address patches, and install the resulting function pointer into `target`.
 // Used by both the fresh-compile path (bytes come from the subprocess shm) and the
 // cache-install path (bytes come from a `.wasmjit` blob).
-static bool install_compiled_function(CompiledInstructions& target, ReadonlyBytes code_bytes, HelperReloc const* relocs, size_t reloc_count, RuntimeHelpers const& helpers)
+static bool install_compiled_function(CompiledInstructions& target, ReadonlyBytes code_bytes, HelperReloc const* relocs, size_t reloc_count, ReadonlySpan<CraneliftTrap> traps, RuntimeHelpers const& helpers)
 {
     if (target.dispatches.is_empty())
         return false;
@@ -209,7 +218,7 @@ static bool install_compiled_function(CompiledInstructions& target, ReadonlyByte
     VirtualProtect(jit_mem, rx_aligned_size, PAGE_EXECUTE_READ, &old_protect);
     FlushInstructionCache(GetCurrentProcess(), jit_mem, code_size);
     auto* func_ptr = static_cast<u8 const*>(jit_mem);
-    auto* handle = new CodeMapping { jit_mem, rx_aligned_size };
+    auto* handle = new CodeMapping { jit_mem, rx_aligned_size, {} };
 #elif defined(AK_OS_MACOS)
     auto const page_size = static_cast<size_t>(sysconf(_SC_PAGESIZE));
     auto const rx_aligned_size = (code_size + page_size - 1) & ~(page_size - 1);
@@ -226,7 +235,7 @@ static bool install_compiled_function(CompiledInstructions& target, ReadonlyByte
     pthread_jit_write_protect_np(1);
     sys_icache_invalidate(jit_mapping, code_size);
     auto* func_ptr = static_cast<u8 const*>(jit_mapping);
-    auto* handle = new CodeMapping { jit_mapping, rx_aligned_size };
+    auto* handle = new CodeMapping { jit_mapping, rx_aligned_size, {} };
 #else
     auto const page_size = static_cast<size_t>(sysconf(_SC_PAGESIZE));
     auto const rx_aligned_size = (code_size + page_size - 1) & ~(page_size - 1);
@@ -240,22 +249,24 @@ static bool install_compiled_function(CompiledInstructions& target, ReadonlyByte
     }
     __builtin___clear_cache(static_cast<char*>(rw_mapping), static_cast<char*>(rw_mapping) + code_size);
     auto* func_ptr = static_cast<u8 const*>(rw_mapping);
-    auto* handle = new CodeMapping { rw_mapping, rx_aligned_size };
+    auto* handle = new CodeMapping { rw_mapping, rx_aligned_size, {} };
 #endif
 
-    target.dispatches[0].handler_ptr = bit_cast<FlatPtr>(func_ptr);
+    handle->traps.ensure_capacity(traps.size());
+    for (auto const& trap : traps)
+        handle->traps.unchecked_append(trap);
+
     target.cranelift_code_handle = handle;
     target.cranelift_code_size = code_size;
+    target.cranelift_traps = handle->traps.data();
+    target.cranelift_trap_count = handle->traps.size();
     target.cranelift_compiled = true;
+    publish_cranelift_entry(target, bit_cast<FlatPtr>(func_ptr));
     return true;
 }
 
 }
 
-// C helpers called by cranelift-generated code (need C linkage but not external visibility).
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wmissing-declarations"
-#pragma GCC diagnostic ignored "-Wmissing-prototypes"
 extern "C" {
 
 static ALWAYS_INLINE i32 wasm_cl_finish_call(BytecodeInterpreter& interpreter, Configuration& config, FunctionAddress address, Vector<Value, ArgumentsStaticSize>& args)
@@ -267,7 +278,7 @@ static ALWAYS_INLINE i32 wasm_cl_finish_call(BytecodeInterpreter& interpreter, C
 
     if (auto* wasm_function = instance->get_pointer<WasmFunction>(); wasm_function
         && !config.should_limit_instruction_count()
-        && wasm_function->code().func().body().compiled_instructions.cranelift_compiled) {
+        && cranelift_entry_acquire(wasm_function->code().func().body().compiled_instructions) != 0) {
 
         // Fast compiled-to-compiled call: stack-allocate locals + non-owning frame.
         auto& func = wasm_function->code().func();
@@ -299,7 +310,7 @@ static ALWAYS_INLINE i32 wasm_cl_finish_call(BytecodeInterpreter& interpreter, C
             auto const* cc = ci.dispatches.data();
             auto const* addrs = ci.src_dst_mappings.data();
             using HandlerFn = Outcome (*)(BytecodeInterpreter&, Configuration&, Instruction const*, u32, Dispatch const*, SourcesAndDestination const*);
-            auto const handler = bit_cast<HandlerFn>(cc[0].handler_ptr);
+            auto const handler = bit_cast<HandlerFn>(cranelift_entry_acquire(ci));
             auto outcome = handler(interpreter, config, cc[0].instruction, 0, cc, addrs);
 
             if (outcome != Outcome::Return) {
@@ -359,6 +370,7 @@ static ALWAYS_INLINE i32 wasm_cl_finish_call(BytecodeInterpreter& interpreter, C
     return 0;
 }
 
+i32 wasm_cl_call_function(void* interp_ptr, void* config_ptr, i32 func_index);
 i32 wasm_cl_call_function(void* interp_ptr, void* config_ptr, i32 func_index)
 {
     auto& interpreter = *static_cast<BytecodeInterpreter*>(interp_ptr);
@@ -384,6 +396,7 @@ i32 wasm_cl_call_function(void* interp_ptr, void* config_ptr, i32 func_index)
     return outcome == Outcome::Return && interpreter.did_trap() ? 1 : 0;
 }
 
+void wasm_cl_set_trap(void* interp_ptr, u8 const* msg, i32 len);
 void wasm_cl_set_trap(void* interp_ptr, u8 const* msg, i32 len)
 {
     auto& interpreter = *static_cast<BytecodeInterpreter*>(interp_ptr);
@@ -404,133 +417,168 @@ static inline MemoryInstance* wasm_cl_get_memory(void* config_ptr, i32 mem_idx)
 
 static inline u8 const* wasm_cl_memory_data_if_in_bounds(MemoryInstance* memory, u64 instance_addr, size_t size)
 {
-    if (instance_addr + size > memory->size())
+    if (instance_addr > memory->size() || size > memory->size() - instance_addr)
         return nullptr;
     return memory->data().offset_pointer(instance_addr);
 }
 
-i64 wasm_cl_memory_load8_s(void* config_ptr, i32 mem_idx, i64 addr)
+i32 wasm_cl_memory_load8_s(void* interp_ptr, void* config_ptr, i32 mem_idx, i64 addr, i64* out);
+i32 wasm_cl_memory_load8_s(void* interp_ptr, void* config_ptr, i32 mem_idx, i64 addr, i64* out)
 {
     auto* memory = wasm_cl_get_memory(config_ptr, mem_idx);
     auto const* data = wasm_cl_memory_data_if_in_bounds(memory, static_cast<u64>(addr), 1);
-    if (!data)
-        return 0;
-    return static_cast<i64>(static_cast<i8>(data[0]));
+    if (!data) {
+        static_cast<BytecodeInterpreter*>(interp_ptr)->set_trap("Memory access out of bounds"sv);
+        return 1;
+    }
+    *out = static_cast<i64>(static_cast<i8>(data[0]));
+    return 0;
 }
 
-i64 wasm_cl_memory_load8_u(void* config_ptr, i32 mem_idx, i64 addr)
+i32 wasm_cl_memory_load8_u(void* interp_ptr, void* config_ptr, i32 mem_idx, i64 addr, i64* out);
+i32 wasm_cl_memory_load8_u(void* interp_ptr, void* config_ptr, i32 mem_idx, i64 addr, i64* out)
 {
     auto* memory = wasm_cl_get_memory(config_ptr, mem_idx);
     auto const* data = wasm_cl_memory_data_if_in_bounds(memory, static_cast<u64>(addr), 1);
-    if (!data)
-        return 0;
-    return static_cast<i64>(data[0]);
+    if (!data) {
+        static_cast<BytecodeInterpreter*>(interp_ptr)->set_trap("Memory access out of bounds"sv);
+        return 1;
+    }
+    *out = static_cast<i64>(data[0]);
+    return 0;
 }
 
-i64 wasm_cl_memory_load16_s(void* config_ptr, i32 mem_idx, i64 addr)
+i32 wasm_cl_memory_load16_s(void* interp_ptr, void* config_ptr, i32 mem_idx, i64 addr, i64* out);
+i32 wasm_cl_memory_load16_s(void* interp_ptr, void* config_ptr, i32 mem_idx, i64 addr, i64* out)
 {
     auto* memory = wasm_cl_get_memory(config_ptr, mem_idx);
     auto const* data = wasm_cl_memory_data_if_in_bounds(memory, static_cast<u64>(addr), 2);
-    if (!data)
-        return 0;
+    if (!data) {
+        static_cast<BytecodeInterpreter*>(interp_ptr)->set_trap("Memory access out of bounds"sv);
+        return 1;
+    }
     u16 val;
     __builtin_memcpy(&val, data, sizeof(val));
-    return static_cast<i64>(static_cast<i16>(val));
+    *out = static_cast<i64>(static_cast<i16>(val));
+    return 0;
 }
 
-i64 wasm_cl_memory_load16_u(void* config_ptr, i32 mem_idx, i64 addr)
+i32 wasm_cl_memory_load16_u(void* interp_ptr, void* config_ptr, i32 mem_idx, i64 addr, i64* out);
+i32 wasm_cl_memory_load16_u(void* interp_ptr, void* config_ptr, i32 mem_idx, i64 addr, i64* out)
 {
     auto* memory = wasm_cl_get_memory(config_ptr, mem_idx);
     auto const* data = wasm_cl_memory_data_if_in_bounds(memory, static_cast<u64>(addr), 2);
-    if (!data)
-        return 0;
+    if (!data) {
+        static_cast<BytecodeInterpreter*>(interp_ptr)->set_trap("Memory access out of bounds"sv);
+        return 1;
+    }
     u16 val;
     __builtin_memcpy(&val, data, sizeof(val));
-    return static_cast<i64>(val);
+    *out = static_cast<i64>(val);
+    return 0;
 }
 
-i64 wasm_cl_memory_load32_s(void* config_ptr, i32 mem_idx, i64 addr)
+i32 wasm_cl_memory_load32_s(void* interp_ptr, void* config_ptr, i32 mem_idx, i64 addr, i64* out);
+i32 wasm_cl_memory_load32_s(void* interp_ptr, void* config_ptr, i32 mem_idx, i64 addr, i64* out)
 {
     auto* memory = wasm_cl_get_memory(config_ptr, mem_idx);
     auto const* data = wasm_cl_memory_data_if_in_bounds(memory, static_cast<u64>(addr), 4);
-    if (!data)
-        return 0;
+    if (!data) {
+        static_cast<BytecodeInterpreter*>(interp_ptr)->set_trap("Memory access out of bounds"sv);
+        return 1;
+    }
     u32 val;
     __builtin_memcpy(&val, data, sizeof(val));
-    return static_cast<i64>(static_cast<i32>(val));
+    *out = static_cast<i64>(static_cast<i32>(val));
+    return 0;
 }
 
-i64 wasm_cl_memory_load32_u(void* config_ptr, i32 mem_idx, i64 addr)
+i32 wasm_cl_memory_load32_u(void* interp_ptr, void* config_ptr, i32 mem_idx, i64 addr, i64* out);
+i32 wasm_cl_memory_load32_u(void* interp_ptr, void* config_ptr, i32 mem_idx, i64 addr, i64* out)
 {
     auto* memory = wasm_cl_get_memory(config_ptr, mem_idx);
     auto const* data = wasm_cl_memory_data_if_in_bounds(memory, static_cast<u64>(addr), 4);
-    if (!data)
-        return 0;
+    if (!data) {
+        static_cast<BytecodeInterpreter*>(interp_ptr)->set_trap("Memory access out of bounds"sv);
+        return 1;
+    }
     u32 val;
     __builtin_memcpy(&val, data, sizeof(val));
-    return static_cast<i64>(val);
+    *out = static_cast<i64>(val);
+    return 0;
 }
 
-i64 wasm_cl_memory_load64(void* config_ptr, i32 mem_idx, i64 addr)
+i32 wasm_cl_memory_load64(void* interp_ptr, void* config_ptr, i32 mem_idx, i64 addr, i64* out);
+i32 wasm_cl_memory_load64(void* interp_ptr, void* config_ptr, i32 mem_idx, i64 addr, i64* out)
 {
     auto* memory = wasm_cl_get_memory(config_ptr, mem_idx);
     auto const* data = wasm_cl_memory_data_if_in_bounds(memory, static_cast<u64>(addr), 8);
-    if (!data)
-        return 0;
+    if (!data) {
+        static_cast<BytecodeInterpreter*>(interp_ptr)->set_trap("Memory access out of bounds"sv);
+        return 1;
+    }
     u64 val;
     __builtin_memcpy(&val, data, sizeof(val));
-    return static_cast<i64>(val);
+    *out = static_cast<i64>(val);
+    return 0;
 }
 
-static inline bool wasm_cl_memory_store_in_bounds(void* config_ptr, i32 mem_idx, i64 addr, size_t size, u8*& data)
+static inline bool wasm_cl_memory_store_in_bounds(void* interp_ptr, void* config_ptr, i32 mem_idx, i64 addr, size_t size, u8*& data)
 {
     auto* memory = wasm_cl_get_memory(config_ptr, mem_idx);
     auto instance_addr = static_cast<u64>(addr);
-    if (instance_addr + size > memory->size())
+    if (instance_addr > memory->size() || size > memory->size() - instance_addr) {
+        static_cast<BytecodeInterpreter*>(interp_ptr)->set_trap("Memory access out of bounds"sv);
         return false;
+    }
     data = memory->data().offset_pointer(instance_addr);
     return true;
 }
 
-i32 wasm_cl_memory_store8(void* config_ptr, i32 mem_idx, i64 addr, i64 value)
+i32 wasm_cl_memory_store8(void* interp_ptr, void* config_ptr, i32 mem_idx, i64 addr, i64 value);
+i32 wasm_cl_memory_store8(void* interp_ptr, void* config_ptr, i32 mem_idx, i64 addr, i64 value)
 {
     u8* data;
-    if (!wasm_cl_memory_store_in_bounds(config_ptr, mem_idx, addr, 1, data))
+    if (!wasm_cl_memory_store_in_bounds(interp_ptr, config_ptr, mem_idx, addr, 1, data))
         return 1; // OOB trap
     data[0] = static_cast<u8>(value);
     return 0;
 }
 
-i32 wasm_cl_memory_store16(void* config_ptr, i32 mem_idx, i64 addr, i64 value)
+i32 wasm_cl_memory_store16(void* interp_ptr, void* config_ptr, i32 mem_idx, i64 addr, i64 value);
+i32 wasm_cl_memory_store16(void* interp_ptr, void* config_ptr, i32 mem_idx, i64 addr, i64 value)
 {
     u8* data;
-    if (!wasm_cl_memory_store_in_bounds(config_ptr, mem_idx, addr, 2, data))
+    if (!wasm_cl_memory_store_in_bounds(interp_ptr, config_ptr, mem_idx, addr, 2, data))
         return 1;
     u16 val = static_cast<u16>(value);
     __builtin_memcpy(data, &val, sizeof(val));
     return 0;
 }
 
-i32 wasm_cl_memory_store32(void* config_ptr, i32 mem_idx, i64 addr, i64 value)
+i32 wasm_cl_memory_store32(void* interp_ptr, void* config_ptr, i32 mem_idx, i64 addr, i64 value);
+i32 wasm_cl_memory_store32(void* interp_ptr, void* config_ptr, i32 mem_idx, i64 addr, i64 value)
 {
     u8* data;
-    if (!wasm_cl_memory_store_in_bounds(config_ptr, mem_idx, addr, 4, data))
+    if (!wasm_cl_memory_store_in_bounds(interp_ptr, config_ptr, mem_idx, addr, 4, data))
         return 1;
     u32 val = static_cast<u32>(value);
     __builtin_memcpy(data, &val, sizeof(val));
     return 0;
 }
 
-i32 wasm_cl_memory_store64(void* config_ptr, i32 mem_idx, i64 addr, i64 value)
+i32 wasm_cl_memory_store64(void* interp_ptr, void* config_ptr, i32 mem_idx, i64 addr, i64 value);
+i32 wasm_cl_memory_store64(void* interp_ptr, void* config_ptr, i32 mem_idx, i64 addr, i64 value)
 {
     u8* data;
-    if (!wasm_cl_memory_store_in_bounds(config_ptr, mem_idx, addr, 8, data))
+    if (!wasm_cl_memory_store_in_bounds(interp_ptr, config_ptr, mem_idx, addr, 8, data))
         return 1;
     u64 val = static_cast<u64>(value);
     __builtin_memcpy(data, &val, sizeof(val));
     return 0;
 }
 
+i64 wasm_cl_memory_size(void* config_ptr, i32 mem_idx);
 i64 wasm_cl_memory_size(void* config_ptr, i32 mem_idx)
 {
     auto& config = *static_cast<Configuration*>(config_ptr);
@@ -540,6 +588,7 @@ i64 wasm_cl_memory_size(void* config_ptr, i32 mem_idx)
     return static_cast<i64>(memory->size() / Constants::page_size);
 }
 
+i32 wasm_cl_memory_grow(void* config_ptr, i32 mem_idx, i32 pages);
 i32 wasm_cl_memory_grow(void* config_ptr, i32 mem_idx, i32 pages)
 {
     auto& config = *static_cast<Configuration*>(config_ptr);
@@ -554,6 +603,7 @@ i32 wasm_cl_memory_grow(void* config_ptr, i32 mem_idx, i32 pages)
     return static_cast<i32>(old_pages);
 }
 
+i64 wasm_cl_read_global(void* config_ptr, i32 index);
 i64 wasm_cl_read_global(void* config_ptr, i32 index)
 {
     auto& config = *static_cast<Configuration*>(config_ptr);
@@ -563,6 +613,7 @@ i64 wasm_cl_read_global(void* config_ptr, i32 index)
     return global->value().to<i64>();
 }
 
+void wasm_cl_write_global(void* config_ptr, i32 index, i64 value);
 void wasm_cl_write_global(void* config_ptr, i32 index, i64 value)
 {
     auto& config = *static_cast<Configuration*>(config_ptr);
@@ -572,6 +623,7 @@ void wasm_cl_write_global(void* config_ptr, i32 index, i64 value)
     global->set_value(Value(value));
 }
 
+i32 wasm_cl_call_indirect(void* interp_ptr, void* config_ptr, i32 table_idx, i32 type_idx, i32 element_index);
 i32 wasm_cl_call_indirect(void* interp_ptr, void* config_ptr, i32 table_idx, i32 type_idx, i32 element_index)
 {
     auto& interpreter = *static_cast<BytecodeInterpreter*>(interp_ptr);
@@ -607,6 +659,7 @@ i32 wasm_cl_call_indirect(void* interp_ptr, void* config_ptr, i32 table_idx, i32
     return outcome == Outcome::Return && interpreter.did_trap() ? 1 : 0;
 }
 
+i32 wasm_cl_memory_copy(void* interp_ptr, void* config_ptr, i32 dst_mem, i32 src_mem, i32 dst_offset, i32 src_offset, i32 count);
 i32 wasm_cl_memory_copy(void* interp_ptr, void* config_ptr, i32 dst_mem, i32 src_mem, i32 dst_offset, i32 src_offset, i32 count)
 {
     auto& interpreter = *static_cast<BytecodeInterpreter*>(interp_ptr);
@@ -627,6 +680,7 @@ i32 wasm_cl_memory_copy(void* interp_ptr, void* config_ptr, i32 dst_mem, i32 src
     return 0;
 }
 
+i32 wasm_cl_memory_fill(void* interp_ptr, void* config_ptr, i32 mem_idx, i32 offset, i32 value, i32 count);
 i32 wasm_cl_memory_fill(void* interp_ptr, void* config_ptr, i32 mem_idx, i32 offset, i32 value, i32 count)
 {
     auto& interpreter = *static_cast<BytecodeInterpreter*>(interp_ptr);
@@ -645,24 +699,28 @@ i32 wasm_cl_memory_fill(void* interp_ptr, void* config_ptr, i32 mem_idx, i32 off
     return 0;
 }
 
+void wasm_cl_stack_push(void* config_ptr, i64 value);
 void wasm_cl_stack_push(void* config_ptr, i64 value)
 {
     auto& config = *static_cast<Configuration*>(config_ptr);
     config.value_stack().append(Value(value));
 }
 
+i64 wasm_cl_stack_pop(void* config_ptr);
 i64 wasm_cl_stack_pop(void* config_ptr)
 {
     auto& config = *static_cast<Configuration*>(config_ptr);
     return config.value_stack().unsafe_take_last().to<i64>();
 }
 
+i64 wasm_cl_stack_size(void* config_ptr);
 i64 wasm_cl_stack_size(void* config_ptr)
 {
     auto& config = *static_cast<Configuration*>(config_ptr);
     return static_cast<i64>(config.value_stack().size());
 }
 
+void wasm_cl_stack_cleanup(void* config_ptr, i64 initial_size, i32 result_arity);
 void wasm_cl_stack_cleanup(void* config_ptr, i64 initial_size, i32 result_arity)
 {
     auto& config = *static_cast<Configuration*>(config_ptr);
@@ -690,12 +748,14 @@ void wasm_cl_stack_cleanup(void* config_ptr, i64 initial_size, i32 result_arity)
         stack.append(saved[i - 1]);
 }
 
+i64 wasm_cl_callrec_read(void* config_ptr, i32 index);
 i64 wasm_cl_callrec_read(void* config_ptr, i32 index)
 {
     auto& config = *static_cast<Configuration*>(config_ptr);
     return config.call_record_entry(index).to<i64>();
 }
 
+void wasm_cl_callrec_write(void* config_ptr, i32 index, i64 value);
 void wasm_cl_callrec_write(void* config_ptr, i32 index, i64 value)
 {
     auto& config = *static_cast<Configuration*>(config_ptr);
@@ -709,6 +769,7 @@ void wasm_cl_callrec_write(void* config_ptr, i32 index, i64 value)
     config.call_record_entry(index) = Value(value);
 }
 
+i32 wasm_cl_call_with_record(void* interp_ptr, void* config_ptr, i32 func_index);
 i32 wasm_cl_call_with_record(void* interp_ptr, void* config_ptr, i32 func_index)
 {
     auto& interpreter = *static_cast<BytecodeInterpreter*>(interp_ptr);
@@ -752,7 +813,7 @@ static ALWAYS_INLINE i32 wasm_cl_direct_call_impl(BytecodeInterpreter& interpret
     auto const& entry = (*table)[index];
 
     if (config.depth() > 500) [[unlikely]] {
-        interpreter.set_trap("call stack exhausted"sv);
+        interpreter.set_trap(Constants::stack_exhaustion_message);
         return 1;
     }
 
@@ -793,6 +854,7 @@ static ALWAYS_INLINE i32 wasm_cl_direct_call_impl(BytecodeInterpreter& interpret
     return 0;
 }
 
+i32 wasm_cl_direct_call_0(void* interp_ptr, void* config_ptr, i32 func_index);
 i32 wasm_cl_direct_call_0(void* interp_ptr, void* config_ptr, i32 func_index)
 {
     auto& interpreter = *static_cast<BytecodeInterpreter*>(interp_ptr);
@@ -800,6 +862,7 @@ i32 wasm_cl_direct_call_0(void* interp_ptr, void* config_ptr, i32 func_index)
     return wasm_cl_direct_call_impl(interpreter, config, func_index, nullptr, 0);
 }
 
+i32 wasm_cl_direct_call_1(void* interp_ptr, void* config_ptr, i32 func_index, i64 arg0);
 i32 wasm_cl_direct_call_1(void* interp_ptr, void* config_ptr, i32 func_index, i64 arg0)
 {
     auto& interpreter = *static_cast<BytecodeInterpreter*>(interp_ptr);
@@ -808,6 +871,7 @@ i32 wasm_cl_direct_call_1(void* interp_ptr, void* config_ptr, i32 func_index, i6
     return wasm_cl_direct_call_impl(interpreter, config, func_index, args, 1);
 }
 
+i32 wasm_cl_direct_call_2(void* interp_ptr, void* config_ptr, i32 func_index, i64 arg0, i64 arg1);
 i32 wasm_cl_direct_call_2(void* interp_ptr, void* config_ptr, i32 func_index, i64 arg0, i64 arg1)
 {
     auto& interpreter = *static_cast<BytecodeInterpreter*>(interp_ptr);
@@ -816,6 +880,7 @@ i32 wasm_cl_direct_call_2(void* interp_ptr, void* config_ptr, i32 func_index, i6
     return wasm_cl_direct_call_impl(interpreter, config, func_index, args, 2);
 }
 
+i32 wasm_cl_direct_call_3(void* interp_ptr, void* config_ptr, i32 func_index, i64 arg0, i64 arg1, i64 arg2);
 i32 wasm_cl_direct_call_3(void* interp_ptr, void* config_ptr, i32 func_index, i64 arg0, i64 arg1, i64 arg2)
 {
     auto& interpreter = *static_cast<BytecodeInterpreter*>(interp_ptr);
@@ -825,8 +890,8 @@ i32 wasm_cl_direct_call_3(void* interp_ptr, void* config_ptr, i32 func_index, i6
 }
 
 // Thin frame push for direct compiled-to-compiled calls. Returns 1 on trap, 0 on success.
-i32 wasm_cl_push_frame(void* interp_ptr, void* config_ptr, Value* locals_ptr, u32 /* total_locals */,
-    void const* module_ptr, void const* expression_ptr, u32 arity, u32 max_call_rec_size)
+i32 wasm_cl_push_frame(void* interp_ptr, void* config_ptr, Value* locals_ptr, u32, void const* module_ptr, void const* expression_ptr, u32 arity, u32 max_call_rec_size);
+i32 wasm_cl_push_frame(void* interp_ptr, void* config_ptr, Value* locals_ptr, u32 /* total_locals */, void const* module_ptr, void const* expression_ptr, u32 arity, u32 max_call_rec_size)
 {
     auto& interpreter = *static_cast<BytecodeInterpreter*>(interp_ptr);
     auto& config = *static_cast<Configuration*>(config_ptr);
@@ -848,6 +913,7 @@ i32 wasm_cl_push_frame(void* interp_ptr, void* config_ptr, Value* locals_ptr, u3
 }
 
 // Thin frame pop for direct compiled-to-compiled calls.
+void wasm_cl_pop_frame(void* config_ptr, u32 arity);
 void wasm_cl_pop_frame(void* config_ptr, u32 arity)
 {
     auto& config = *static_cast<Configuration*>(config_ptr);
@@ -858,7 +924,6 @@ void wasm_cl_pop_frame(void* config_ptr, u32 arity)
     config.unwind_impl();
 }
 }
-#pragma GCC diagnostic pop
 
 namespace Wasm {
 
@@ -1168,6 +1233,8 @@ static void try_cranelift_compile_batch(Vector<BatchInput>& batch)
 
         auto code_offset = static_cast<size_t>(output->code_offset);
         auto code_size = static_cast<size_t>(output->code_size);
+        if (code_offset > code_region_size || code_size > code_region_size - code_offset)
+            continue;
         auto code_start = code_base_offset + code_offset;
         if (code_start + code_size > total_size)
             continue;
@@ -1175,15 +1242,32 @@ static void try_cranelift_compile_batch(Vector<BatchInput>& batch)
         auto const reloc_offset = static_cast<size_t>(output->reloc_offset);
         auto const reloc_count = static_cast<size_t>(output->reloc_count);
         auto const reloc_bytes = reloc_count * sizeof(HelperReloc);
+        if (reloc_count != 0 && reloc_bytes / sizeof(HelperReloc) != reloc_count)
+            continue;
+        if (reloc_offset > reloc_region_size || reloc_bytes > reloc_region_size - reloc_offset)
+            continue;
         if (reloc_region_start + reloc_offset + reloc_bytes > total_size)
+            continue;
+
+        auto const trap_offset = static_cast<size_t>(output->trap_offset);
+        auto const trap_count = static_cast<size_t>(output->trap_count);
+        auto const trap_bytes = trap_count * sizeof(CraneliftTrap);
+        if (trap_count != 0 && trap_bytes / sizeof(CraneliftTrap) != trap_count)
+            continue;
+        if (trap_offset > reloc_region_size || trap_bytes > reloc_region_size - trap_offset)
+            continue;
+        if (reloc_region_start + trap_offset + trap_bytes > total_size)
             continue;
 
         auto code_bytes = ReadonlyBytes { base + code_start, code_size };
         auto const* relocs = reloc_count == 0
             ? nullptr
             : reinterpret_cast<HelperReloc const*>(base + reloc_region_start + reloc_offset);
+        auto traps = trap_count == 0
+            ? ReadonlySpan<CraneliftTrap> {}
+            : ReadonlySpan<CraneliftTrap> { reinterpret_cast<CraneliftTrap const*>(base + reloc_region_start + trap_offset), trap_count };
 
-        auto& capture = s_cranelift_cache_state.cache_capture;
+        auto& capture = cranelift_cache_state().cache_capture;
         if (capture.capturing && batch[i].function_index != NumericLimits<u32>::max()) {
             if (auto copy = ByteBuffer::copy(code_bytes.data(), code_bytes.size()); !copy.is_error()) {
                 CacheRecord rec;
@@ -1192,11 +1276,14 @@ static void try_cranelift_compile_batch(Vector<BatchInput>& batch)
                 rec.relocs.ensure_capacity(reloc_count);
                 for (size_t j = 0; j < reloc_count; ++j)
                     rec.relocs.unchecked_append(relocs[j]);
+                rec.traps.ensure_capacity(trap_count);
+                for (size_t j = 0; j < trap_count; ++j)
+                    rec.traps.unchecked_append(traps[j]);
                 capture.records.append(move(rec));
             }
         }
 
-        install_compiled_function(*batch[i].target, code_bytes, relocs, reloc_count, helpers);
+        install_compiled_function(*batch[i].target, code_bytes, relocs, reloc_count, traps, helpers);
     }
 }
 
@@ -1218,21 +1305,26 @@ bool try_cranelift_compile(CompiledInstructions& compiled, u32 result_arity)
     if (compiled.cranelift_compiled)
         return true;
 
+    if (s_active_function_index == NumericLimits<u32>::max())
+        return false;
+
     // Cache hit: install from the parsed blob instead of going through cranelift.
     //            dispatches[] has just been populated by try_compile_instructions, so handler_ptr is ready to be set.
-    if (s_cranelift_cache_state.pending_install.active && s_active_function_index != NumericLimits<u32>::max()) {
-        auto record = s_cranelift_cache_state.pending_install.records.take(s_active_function_index);
+    if (cranelift_cache_state().pending_install.active && s_active_function_index != NumericLimits<u32>::max()) {
+        auto record = cranelift_cache_state().pending_install.records.take(s_active_function_index);
         if (record.has_value()) {
             static auto cache_install_helpers = make_runtime_helpers();
             if (install_compiled_function(
                     compiled,
                     record->unpatched_code.bytes(),
                     record->relocs.is_empty() ? nullptr : record->relocs.data(),
-                    record->relocs.size(), cache_install_helpers)) {
+                    record->relocs.size(),
+                    record->traps.span(),
+                    cache_install_helpers)) {
                 return true;
             }
             // Put it back so we can try later.
-            s_cranelift_cache_state.pending_install.records.set(s_active_function_index, record.release_value());
+            cranelift_cache_state().pending_install.records.set(s_active_function_index, record.release_value());
         }
     }
 
@@ -1265,9 +1357,9 @@ bool try_cranelift_compile(CompiledInstructions& compiled, u32 result_arity)
         static size_t s_min_insns = read_size_env("CRANELIFT_MIN_INSNS", 0);
         static size_t s_min_fn = read_size_env("CRANELIFT_MIN_FN", 0);
         static size_t s_max_fn = read_size_env("CRANELIFT_MAX_FN", NumericLimits<size_t>::max());
-        static auto s_skip_fn = read_set_env("CRANELIFT_SKIP_FN");
-        static auto s_only_fn = read_set_env("CRANELIFT_ONLY_FN");
-        static auto s_dump_fn = read_set_env("CRANELIFT_DUMP_FN");
+        static auto& s_skip_fn = *new HashTable<size_t>(read_set_env("CRANELIFT_SKIP_FN"));
+        static auto& s_only_fn = *new HashTable<size_t>(read_set_env("CRANELIFT_ONLY_FN"));
+        static auto& s_dump_fn = *new HashTable<size_t>(read_set_env("CRANELIFT_DUMP_FN"));
         static bool s_trace = getenv("CRANELIFT_TRACE") != nullptr;
 
         static size_t s_func_counter = 0;
@@ -1328,6 +1420,9 @@ bool try_cranelift_compile(CompiledInstructions& compiled, u32 result_arity)
     for (size_t i = 0; i < dispatches.size(); ++i) {
         flat.append(serialize_insn(dispatches[i], addresses[i]));
 
+        if (dispatches[i].instruction->opcode().value() == Instructions::synthetic_tier_up.value())
+            flat.last().imm1 = static_cast<i64>(i);
+
         if (dispatches[i].instruction->opcode().value() == Instructions::br_table.value()) {
             auto const& table_args = dispatches[i].instruction->arguments().get<Instruction::TableBranchArgs>();
             auto const total = table_args.labels.size();
@@ -1348,17 +1443,22 @@ bool try_cranelift_compile(CompiledInstructions& compiled, u32 result_arity)
         }
     }
 
-    s_cranelift_cache_state.pending_batch.append({ move(flat), result_arity, s_active_function_index, &compiled });
+    cranelift_cache_state().pending_batch.append({ move(flat), result_arity, s_active_function_index, &compiled });
     return false; // Not compiled yet, will be compiled in flush.
 #endif
 }
 
 void flush_cranelift_batch()
 {
-    if (s_cranelift_cache_state.pending_batch.is_empty())
+    if (cranelift_cache_state().pending_batch.is_empty())
         return;
-    try_cranelift_compile_batch(s_cranelift_cache_state.pending_batch);
-    s_cranelift_cache_state.pending_batch.clear();
+    try_cranelift_compile_batch(cranelift_cache_state().pending_batch);
+    cranelift_cache_state().pending_batch.clear();
+}
+
+void discard_cranelift_batch()
+{
+    cranelift_cache_state().pending_batch.clear();
 }
 
 void free_cranelift_code(void* handle)
@@ -1381,30 +1481,30 @@ void set_cranelift_active_function_index(u32 function_index)
 
 void begin_cranelift_cache_capture()
 {
-    s_cranelift_cache_state.cache_capture.capturing = true;
-    s_cranelift_cache_state.cache_capture.records.clear();
+    cranelift_cache_state().cache_capture.capturing = true;
+    cranelift_cache_state().cache_capture.records.clear();
 }
 
 void abort_cranelift_cache_capture()
 {
-    s_cranelift_cache_state.cache_capture.capturing = false;
-    s_cranelift_cache_state.cache_capture.records.clear();
+    cranelift_cache_state().cache_capture.capturing = false;
+    cranelift_cache_state().cache_capture.records.clear();
 }
 
 void abort_cranelift_cache_install()
 {
-    s_cranelift_cache_state.pending_install.active = false;
-    s_cranelift_cache_state.pending_install.records.clear();
+    cranelift_cache_state().pending_install.active = false;
+    cranelift_cache_state().pending_install.records.clear();
 }
 
 Optional<ByteBuffer> serialize_cranelift_cache_blob(ReadonlyBytes wasm_hash)
 {
     ScopeGuard reset = [] {
-        s_cranelift_cache_state.cache_capture.capturing = false;
-        s_cranelift_cache_state.cache_capture.records.clear();
+        cranelift_cache_state().cache_capture.capturing = false;
+        cranelift_cache_state().cache_capture.records.clear();
     };
 
-    auto const& capture = s_cranelift_cache_state.cache_capture;
+    auto const& capture = cranelift_cache_state().cache_capture;
 
     if (!capture.capturing || capture.records.is_empty())
         return {};
@@ -1418,6 +1518,7 @@ Optional<ByteBuffer> serialize_cranelift_cache_blob(ReadonlyBytes wasm_hash)
         total_size += sizeof(CacheBlobFunctionEntry);
         total_size += align_up(r.unpatched_code.size(), 16);
         total_size += r.relocs.size() * sizeof(HelperReloc);
+        total_size += r.traps.size() * sizeof(CraneliftTrap);
     }
 
     auto blob_or_error = ByteBuffer::create_zeroed(total_size);
@@ -1440,6 +1541,7 @@ Optional<ByteBuffer> serialize_cranelift_cache_blob(ReadonlyBytes wasm_hash)
         entry->function_index = r.function_index;
         entry->code_size = static_cast<u32>(r.unpatched_code.size());
         entry->reloc_count = static_cast<u32>(r.relocs.size());
+        entry->trap_count = static_cast<u32>(r.traps.size());
         offset += sizeof(CacheBlobFunctionEntry);
 
         __builtin_memcpy(out + offset, r.unpatched_code.data(), r.unpatched_code.size());
@@ -1449,6 +1551,11 @@ Optional<ByteBuffer> serialize_cranelift_cache_blob(ReadonlyBytes wasm_hash)
         if (reloc_bytes > 0)
             __builtin_memcpy(out + offset, r.relocs.data(), reloc_bytes);
         offset += reloc_bytes;
+
+        auto trap_bytes = r.traps.size() * sizeof(CraneliftTrap);
+        if (trap_bytes > 0)
+            __builtin_memcpy(out + offset, r.traps.data(), trap_bytes);
+        offset += trap_bytes;
     }
 
     return blob;
@@ -1494,6 +1601,12 @@ bool try_install_cranelift_cache_blob(ReadonlyBytes expected_wasm_hash, Readonly
             return false;
         offset += reloc_bytes;
 
+        auto trap_off = offset;
+        auto trap_bytes = static_cast<size_t>(entry->trap_count) * sizeof(CraneliftTrap);
+        if (trap_off + trap_bytes > blob.size())
+            return false;
+        offset += trap_bytes;
+
         auto code_copy = ByteBuffer::copy(blob.data() + code_off, entry->code_size);
         if (code_copy.is_error())
             return false;
@@ -1507,10 +1620,16 @@ bool try_install_cranelift_cache_blob(ReadonlyBytes expected_wasm_hash, Readonly
             __builtin_memcpy(&reloc, blob.data() + reloc_off + j * sizeof(HelperReloc), sizeof(HelperReloc));
             rec.relocs.unchecked_append(reloc);
         }
-        s_cranelift_cache_state.pending_install.records.set(entry->function_index, move(rec));
+        rec.traps.ensure_capacity(entry->trap_count);
+        for (u32 j = 0; j < entry->trap_count; ++j) {
+            CraneliftTrap trap;
+            __builtin_memcpy(&trap, blob.data() + trap_off + j * sizeof(CraneliftTrap), sizeof(CraneliftTrap));
+            rec.traps.unchecked_append(trap);
+        }
+        cranelift_cache_state().pending_install.records.set(entry->function_index, move(rec));
     }
 
-    s_cranelift_cache_state.pending_install.active = true;
+    cranelift_cache_state().pending_install.active = true;
     return true;
 }
 

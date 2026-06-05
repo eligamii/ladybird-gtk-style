@@ -48,7 +48,9 @@
 #include <LibWeb/HTML/VisibilityState.h>
 #include <LibWeb/InvalidateDisplayList.h>
 #include <LibWeb/Painting/FlexboxInspectorOverlay.h>
+#include <LibWeb/Painting/Forward.h>
 #include <LibWeb/Painting/GridInspectorOverlay.h>
+#include <LibWeb/Painting/HitTestResult.h>
 #include <LibWeb/ResizeObserver/ResizeObserver.h>
 #include <LibWeb/TrustedTypes/InjectionSink.h>
 #include <LibWeb/WebIDL/ExceptionOr.h>
@@ -81,6 +83,7 @@ enum class InvalidateLayoutTreeReason {
     X(Debugging)                             \
     X(DocumentElementFromPoint)              \
     X(DocumentElementsFromPoint)             \
+    X(DocumentCaretPositionFromPoint)        \
     X(DocumentFindMatchingText)              \
     X(DocumentSetDesignMode)                 \
     X(DumpDisplayList)                       \
@@ -121,9 +124,9 @@ enum class InvalidateLayoutTreeReason {
     X(HTMLInputElementWidth)                 \
     X(HTMLLabelElementActivationBehavior)    \
     X(HostedDocumentBeforePaint)             \
+    X(InspectAccessibilityTree)              \
     X(InspectDOMTree)                        \
-    X(InspectFlexboxLayout)                  \
-    X(InspectGridLayout)                     \
+    X(InspectDevToolsLayoutData)             \
     X(InternalsHitTest)                      \
     X(MediaQueryListMatches)                 \
     X(NavigableSelectedText)                 \
@@ -396,6 +399,7 @@ public:
     void update_layout(UpdateLayoutReason);
     void update_layout_if_needed_for_node(Node const&, UpdateLayoutReason);
     [[nodiscard]] bool layout_is_up_to_date() const;
+    void clear_devtools_layout_inspection_data();
     void update_paint_and_hit_testing_properties_if_needed();
     void update_animated_style_if_needed();
 
@@ -960,6 +964,7 @@ public:
 
     InputEventsTarget* active_input_events_target(DOM::Node const* for_node = nullptr);
     GC::Ptr<DOM::Position> cursor_position() const;
+    void set_cursor_position_needs_repaint();
 
     bool cursor_blink_state() const { return m_cursor_blink_state; }
 
@@ -975,6 +980,16 @@ public:
     }
 
     RefPtr<Painting::DisplayList> record_display_list(HTML::PaintConfig, Painting::DisplayListResourceStorage&);
+    Painting::HitTestDisplayList const* hit_test_display_list() const { return m_hit_test_display_list.ptr(); }
+    Painting::HitTestDisplayList const* ensure_hit_test_display_list();
+    Optional<Painting::HitTestResult> hit_test(CSSPixelPoint, Painting::HitTestType);
+    Optional<Painting::CaretPosition> caret_position_from_point(CSSPixelPoint);
+    Optional<Painting::CaretPosition> caret_position_from_point_for_selection_start(CSSPixelPoint);
+    Optional<Painting::CaretPosition> caret_position_from_point_for_selection(CSSPixelPoint);
+    GC::Ptr<CaretPosition> caret_position_from_point(double x, double y, Bindings::CaretPositionFromPointOptions const&);
+    TraversalDecision hit_test_all(CSSPixelPoint, Function<TraversalDecision(Painting::HitTestResult)> const&);
+
+    void set_caret_hit_test_debug_rect(Optional<CSSPixelRect>);
 
     void set_needs_to_record_display_list();
 
@@ -1470,6 +1485,8 @@ private:
 
     bool m_needs_accumulated_visual_contexts_update { false };
     bool m_needs_invalidation_of_elements_affected_by_has { false };
+    RefPtr<Painting::HitTestDisplayList> m_hit_test_display_list;
+    Optional<CSSPixelRect> m_caret_hit_test_debug_rect;
 
     mutable StyleInvalidationCounters m_style_invalidation_counters;
     mutable u64 m_style_invalidations_since_last_counter_dump { 0 };

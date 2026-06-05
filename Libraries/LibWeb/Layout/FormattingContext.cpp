@@ -409,8 +409,17 @@ OwnPtr<FormattingContext> FormattingContext::layout_inside(Box const& child_box,
         // OPTIMIZATION: If we're doing intrinsic sizing and `child_box` has definite size in both axes,
         //               we don't need to layout its insides. The size is resolvable without learning
         //               the metrics of whatever's inside the box.
+        //
+        // https://drafts.csswg.org/css2/#propdef-vertical-align
+        // The baseline of an inline-block is the baseline of its last line box in the normal flow, unless it has
+        // either no in-flow line boxes or if its 'overflow' property has a computed value other than visible, in which
+        // case the baseline is the bottom margin edge.
+        //
+        // Inline-level boxes can contribute a baseline to their parent line box, so they still need their contents
+        // laid out even when their own intrinsic size is already definite.
         auto const& used_values = m_state.get(child_box);
         if (layout_mode == LayoutMode::IntrinsicSizing
+            && !child_box.is_inline()
             && used_values.width_constraint == SizeConstraint::None
             && used_values.height_constraint == SizeConstraint::None
             && used_values.has_definite_width()
@@ -643,7 +652,9 @@ CSSPixels FormattingContext::compute_table_box_width_inside_table_wrapper(
     table_box_state.padding_right = table_box_computed_values.padding().right().to_px_or_zero(*table_box, width_of_containing_block);
 
     auto context = make<TableFormattingContext>(throwaway_state, LayoutMode::IntrinsicSizing, *table_box, this);
-    context->run_until_width_calculation(m_state.get(*table_box).available_inner_space_or_constraints_from(available_space));
+    context->run_until_width_calculation(
+        m_state.get(*table_box).available_inner_space_or_constraints_from(available_space),
+        TableFormattingContext::RowMeasurement::Skip);
 
     auto table_used_width = throwaway_state.get(*table_box).border_box_width();
     if (table_wrapper_width_mode == TableWrapperWidthMode::UseTableUsedWidthIfNotAuto

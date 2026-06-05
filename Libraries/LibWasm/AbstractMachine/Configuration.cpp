@@ -62,6 +62,30 @@ ErrorOr<Optional<HostFunction&>, Trap> Configuration::prepare_call(FunctionAddre
     return function->get<HostFunction>();
 }
 
+ErrorOr<void, Trap> Configuration::prepare_wasm_call(WasmFunction const& wasm_function, Vector<Value, ArgumentsStaticSize>& arguments, bool is_tailcall)
+{
+    // Tier-0 by default: don't block the call waiting for native compilation. Non-Web embedders
+    // compile synchronously at instantiate time (so the JIT is already live here); the Web path
+    // compiles in the background and the interpreter picks up the native entry on a later call
+    // once it's published. Either way, execution falls back to the interpreter until then.
+    if (is_tailcall)
+        unwind_impl();
+
+    arguments.ensure_capacity(arguments.size() + wasm_function.code().func().total_local_count());
+    for (auto const& local : wasm_function.code().func().locals()) {
+        for (size_t i = 0; i < local.n(); ++i)
+            arguments.unchecked_append(Value(local.type()));
+    }
+
+    set_frame(
+        is_tailcall ? IsTailcall::Yes : IsTailcall::No,
+        wasm_function.module(),
+        move(arguments),
+        wasm_function.code().func().body(),
+        wasm_function.type().results().size());
+    return {};
+}
+
 Result Configuration::execute(Interpreter& interpreter)
 {
     interpreter.interpret(*this);

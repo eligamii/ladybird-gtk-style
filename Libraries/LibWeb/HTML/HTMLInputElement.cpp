@@ -13,6 +13,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/NeverDestroyed.h>
 #include <LibGfx/DecodedImageFrame.h>
 #include <LibJS/Runtime/Date.h>
 #include <LibJS/Runtime/NativeFunction.h>
@@ -53,6 +54,7 @@
 #include <LibWeb/Layout/CheckBox.h>
 #include <LibWeb/Layout/ImageBox.h>
 #include <LibWeb/Layout/RadioButton.h>
+#include <LibWeb/Layout/RangeInputBox.h>
 #include <LibWeb/Layout/TextInputBox.h>
 #include <LibWeb/MimeSniff/MimeType.h>
 #include <LibWeb/MimeSniff/Resource.h>
@@ -168,6 +170,8 @@ GC::Ptr<Layout::Node> HTMLInputElement::create_layout_node(GC::Ref<CSS::Computed
     case TypeAttributeState::Number:
         // FIXME: text padding issues
         return heap().allocate<Layout::TextInputBox>(document(), *this, move(style));
+    case TypeAttributeState::Range:
+        return heap().allocate<Layout::RangeInputBox>(document(), *this, move(style));
     default:
         return Element::create_layout_node_for_display_type(document(), style->display(), style, this);
     }
@@ -804,7 +808,7 @@ void HTMLInputElement::commit_pending_changes()
 // https://www.w3.org/TR/css-ui-4/#input-rules
 static GC::Ref<CSS::CSSStyleProperties> inner_text_style_when_visible()
 {
-    static GC::Root<CSS::CSSStyleProperties> style;
+    static auto& style = *new GC::Root<CSS::CSSStyleProperties>;
     if (!style) {
         style = CSS::CSSStyleProperties::create(internal_css_realm(), {}, {});
         style->set_declarations_from_text(R"~~~(
@@ -822,7 +826,7 @@ static GC::Ref<CSS::CSSStyleProperties> inner_text_style_when_visible()
 
 static GC::Ref<CSS::CSSStyleProperties> inner_text_style_when_hidden()
 {
-    static GC::Root<CSS::CSSStyleProperties> style;
+    static auto& style = *new GC::Root<CSS::CSSStyleProperties>;
     if (!style) {
         style = CSS::CSSStyleProperties::create(internal_css_realm(), {}, {});
         style->set_declarations_from_text(R"~~~(
@@ -835,7 +839,7 @@ static GC::Ref<CSS::CSSStyleProperties> inner_text_style_when_hidden()
 
 static GC::Ref<CSS::CSSStyleProperties> stepper_button_style_when_visible()
 {
-    static GC::Root<CSS::CSSStyleProperties> style;
+    static auto& style = *new GC::Root<CSS::CSSStyleProperties>;
     if (!style) {
         style = CSS::CSSStyleProperties::create(internal_css_realm(), {}, {});
         style->set_declarations_from_text(R"~~~(
@@ -848,7 +852,7 @@ static GC::Ref<CSS::CSSStyleProperties> stepper_button_style_when_visible()
 
 static GC::Ref<CSS::CSSStyleProperties> stepper_button_style_when_hidden()
 {
-    static GC::Root<CSS::CSSStyleProperties> style;
+    static auto& style = *new GC::Root<CSS::CSSStyleProperties>;
     if (!style) {
         style = CSS::CSSStyleProperties::create(internal_css_realm(), {}, {});
         style->set_declarations_from_text(R"~~~(
@@ -860,7 +864,7 @@ static GC::Ref<CSS::CSSStyleProperties> stepper_button_style_when_hidden()
 
 static GC::Ref<CSS::CSSStyleProperties> placeholder_style_when_visible()
 {
-    static GC::Root<CSS::CSSStyleProperties> style;
+    static auto& style = *new GC::Root<CSS::CSSStyleProperties>;
     if (!style) {
         style = CSS::CSSStyleProperties::create(internal_css_realm(), {}, {});
         style->set_declarations_from_text(R"~~~(
@@ -878,7 +882,7 @@ static GC::Ref<CSS::CSSStyleProperties> placeholder_style_when_visible()
 
 static GC::Ref<CSS::CSSStyleProperties> placeholder_style_when_hidden()
 {
-    static GC::Root<CSS::CSSStyleProperties> style;
+    static auto& style = *new GC::Root<CSS::CSSStyleProperties>;
     if (!style) {
         style = CSS::CSSStyleProperties::create(internal_css_realm(), {}, {});
         style->set_declarations_from_text("display: none;"sv);
@@ -1127,7 +1131,7 @@ void HTMLInputElement::create_text_input_shadow_tree()
 
     auto element = MUST(DOM::create_element(document(), HTML::TagNames::div, Namespace::HTML));
     {
-        static GC::Root<CSS::CSSStyleProperties> style;
+        static auto& style = *new GC::Root<CSS::CSSStyleProperties>;
         if (!style) {
             style = CSS::CSSStyleProperties::create(internal_css_realm(), {}, {});
             style->set_declarations_from_text(R"~~~(
@@ -1146,7 +1150,7 @@ void HTMLInputElement::create_text_input_shadow_tree()
     // https://www.w3.org/TR/css-ui-4/#input-rules
     m_inner_text_element = MUST(DOM::create_element(document(), HTML::TagNames::div, Namespace::HTML));
     {
-        static GC::Root<CSS::CSSStyleProperties> style;
+        static auto& style = *new GC::Root<CSS::CSSStyleProperties>;
         if (!style) {
             style = CSS::CSSStyleProperties::create(internal_css_realm(), {}, {});
             style->set_declarations_from_text(R"~~~(
@@ -1407,19 +1411,21 @@ void HTMLInputElement::create_range_input_shadow_tree()
     auto update_slider_by_mouse = [this](JS::VM& vm) {
         if (type_state() != TypeAttributeState::Range)
             return;
-        auto client_x_value = MUST(vm.argument(0).get(vm, "clientX"_utf16_fly_string));
-        if (!client_x_value.is_finite_number())
+        auto event = vm.argument(0).as_if<UIEvents::MouseEvent>();
+        if (!event)
             return;
-        auto client_x = client_x_value.as_double();
-        auto rect = get_bounding_client_rect();
-        if (rect.width().to_double() <= 0)
+        auto client_x = event->client_x();
+        if (!isfinite(client_x))
+            return;
+        auto rect = get_bounding_client_rect().to_type<double>();
+        if (rect.width() <= 0)
             return;
         double minimum = *min();
         double maximum = *max();
         if (minimum > maximum)
             return;
-        // FIXME: Snap new value to input steps
-        MUST(set_value_as_number(clamp(round(((client_x - rect.left().to_double()) / rect.width().to_double()) * (maximum - minimum) + minimum), minimum, maximum)));
+        auto relative_x = client_x - rect.left();
+        MUST(set_value_as_number(mix(minimum, maximum, relative_x / rect.width())));
         user_interaction_did_change_input_value();
     };
 
@@ -3598,10 +3604,10 @@ bool HTMLInputElement::suffering_from_being_missing() const
 // https://html.spec.whatwg.org/multipage/input.html#valid-e-mail-address
 static regex::ECMAScriptRegex& valid_email_address_regex()
 {
-    static auto regex = MUST(regex::ECMAScriptRegex::compile(
+    static NeverDestroyed<regex::ECMAScriptRegex> regex { MUST(regex::ECMAScriptRegex::compile(
         "^[a-zA-Z0-9.!#$%&'*+\\/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$"sv,
-        regex::ECMAScriptCompileFlags {}));
-    return regex;
+        regex::ECMAScriptCompileFlags {})) };
+    return *regex;
 }
 
 // https://html.spec.whatwg.org/multipage/form-control-infrastructure.html#suffering-from-a-type-mismatch

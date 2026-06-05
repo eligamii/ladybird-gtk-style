@@ -13,11 +13,12 @@
 #include <LibWebView/Utilities.h>
 #include <LibWebView/WebContentClient.h>
 #include <UI/Qt/BrowserWindow.h>
+#include <UI/Qt/ChromeLayout.h>
 #include <UI/Qt/ChromeStyle.h>
 #include <UI/Qt/Icon.h>
 #include <UI/Qt/Menu.h>
-#include <UI/Qt/Settings.h>
 #include <UI/Qt/StringUtils.h>
+#include <UI/Qt/WindowControlButton.h>
 
 #include <QColorDialog>
 #include <QFileDialog>
@@ -34,6 +35,8 @@
 #include <QTimer>
 
 namespace Ladybird {
+
+static constexpr auto WINDOW_DRAG_REGION_PROPERTY = "LadybirdWindowDragRegion";
 
 class HamburgerButton final : public QToolButton {
 public:
@@ -69,12 +72,6 @@ private:
     }
 };
 
-static QIcon default_favicon()
-{
-    static QIcon icon = load_icon_from_uri("resource://icons/48x48/app-browser.png"sv);
-    return icon;
-}
-
 static QToolButton* create_toolbar_button(QWidget& parent, QAction& action)
 {
     auto* button = new QToolButton(&parent);
@@ -82,14 +79,28 @@ static QToolButton* create_toolbar_button(QWidget& parent, QAction& action)
     button->setAutoRaise(true);
     button->setFocusPolicy(Qt::NoFocus);
     button->setIconSize({ 20, 20 });
-    button->setFixedSize(38, 38);
+    button->setFixedSize(36, 36);
+
+    // FIXME: In Menu.cpp, we set the initial visibility of the action before we've associated it with this QToolButton.
+    //        It would be nicer if we didn't have to do this here.
+    button->setVisible(action.isVisible());
+
     return button;
 }
+
+static constexpr int TOOLBAR_HORIZONTAL_MARGIN = 12;
+static constexpr int TOOLBAR_VERTICAL_MARGIN = 2;
+static constexpr int TOOLBAR_MACOS_TRAFFIC_LIGHTS_CONTROL_GAP = 22;
+static constexpr int TOOLBAR_SIDEBAR_TOGGLE_NAVIGATION_GAP = 8;
+static constexpr int TOOLBAR_LOCATION_EDIT_SIDE_GAP = 32;
+static constexpr int TOOLBAR_WINDOW_CONTROLS_RIGHT_MARGIN = 4;
 
 Tab::Tab(BrowserWindow* window, RefPtr<WebView::WebContentClient> parent_client, size_t page_index)
     : QWidget(window)
     , m_window(window)
 {
+    auto& application = WebView::Application::the();
+
     auto* tab_layout = new QBoxLayout(QBoxLayout::Direction::TopToBottom, this);
     tab_layout->setSpacing(0);
     tab_layout->setContentsMargins(0, 0, 0, 0);
@@ -109,7 +120,7 @@ Tab::Tab(BrowserWindow* window, RefPtr<WebView::WebContentClient> parent_client,
 
     m_toolbar = new QWidget(this);
     m_toolbar->setObjectName("LadybirdNavigationToolbar");
-    m_toolbar->setFixedHeight(47);
+    m_toolbar->setFixedHeight(browser_chrome_layout_policy().toolbar_height);
     m_toolbar->setSizePolicy(QSizePolicy::MinimumExpanding, QSizePolicy::Fixed);
 
     auto* toolbar_container_layout = new QVBoxLayout(m_toolbar_container);
@@ -118,7 +129,7 @@ Tab::Tab(BrowserWindow* window, RefPtr<WebView::WebContentClient> parent_client,
 
     auto* toolbar_layout = new QHBoxLayout(m_toolbar);
     toolbar_layout->setSpacing(6);
-    toolbar_layout->setContentsMargins(12, 3, 12, 3);
+    toolbar_layout->setContentsMargins(TOOLBAR_HORIZONTAL_MARGIN, TOOLBAR_VERTICAL_MARGIN, TOOLBAR_HORIZONTAL_MARGIN, TOOLBAR_VERTICAL_MARGIN);
 
     m_location_edit = new LocationEdit(this);
     m_bookmarks_bar = new BookmarksBar(this);
@@ -144,16 +155,15 @@ Tab::Tab(BrowserWindow* window, RefPtr<WebView::WebContentClient> parent_client,
 
     toolbar_container_layout->addWidget(m_toolbar);
     toolbar_container_layout->addWidget(m_bookmarks_bar);
-    tab_layout->addWidget(m_toolbar_container);
     tab_layout->addWidget(m_view);
     tab_layout->addWidget(m_find_in_page);
 
     m_hamburger_button = new HamburgerButton(m_toolbar);
     m_hamburger_button->setText("Show &Menu");
     m_hamburger_button->setToolTip("Show Menu");
-    m_hamburger_button->setIcon(create_tvg_icon_with_theme_colors("hamburger", palette()));
+    m_hamburger_button->setIcon(create_chrome_icon(ChromeIcon::Menu, palette()));
     m_hamburger_button->setIconSize({ 20, 20 });
-    m_hamburger_button->setFixedSize(38, 38);
+    m_hamburger_button->setFixedSize(36, 36);
     m_hamburger_button->setAutoRaise(true);
     m_hamburger_button->setFocusPolicy(Qt::NoFocus);
     m_hamburger_button->setPopupMode(QToolButton::InstantPopup);
@@ -162,31 +172,75 @@ Tab::Tab(BrowserWindow* window, RefPtr<WebView::WebContentClient> parent_client,
 
     m_navigate_back_action = create_application_action(*this, view().navigate_back_action());
     m_navigate_forward_action = create_application_action(*this, view().navigate_forward_action());
-    m_reload_action = create_application_action(*this, WebView::Application::the().reload_action());
+    m_reload_action = create_application_action(*this, application.reload_action());
+    m_toggle_vertical_tabs_expanded_action = create_application_action(*this, application.toggle_vertical_tabs_expanded_action());
+
+    m_toolbar_window_controls_separator = new QWidget(m_toolbar);
+    m_toolbar_window_controls_separator->setObjectName("LadybirdToolbarWindowControlsSeparator");
+    m_toolbar_window_controls_separator->setFixedSize(1, 22);
+
+    auto window_control_buttons = create_window_control_buttons(*m_toolbar, "LadybirdToolbarWindowControls", { 16, 16 }, { 38, 38 });
+    m_toolbar_window_controls = window_control_buttons.container;
+    m_minimize_window_button = window_control_buttons.minimize;
+    m_maximize_window_button = window_control_buttons.maximize;
+    m_close_window_button = window_control_buttons.close;
+
+    QObject::connect(m_minimize_window_button, &QToolButton::clicked, this, [this] {
+        m_window->showMinimized();
+    });
+    QObject::connect(m_maximize_window_button, &QToolButton::clicked, this, [this] {
+        if (m_window->isMaximized())
+            m_window->showNormal();
+        else
+            m_window->showMaximized();
+    });
+    QObject::connect(m_close_window_button, &QToolButton::clicked, this, [this] {
+        m_window->close();
+    });
 
     recreate_toolbar_icons();
-
-    m_favicon = default_favicon();
 
     m_page_context_menu = create_context_menu(*this, view(), view().page_context_menu());
     m_link_context_menu = create_context_menu(*this, view(), view().link_context_menu());
     m_image_context_menu = create_context_menu(*this, view(), view().image_context_menu());
     m_media_context_menu = create_context_menu(*this, view(), view().media_context_menu());
 
-    toolbar_layout->addWidget(create_toolbar_button(*m_toolbar, *m_navigate_back_action));
-    toolbar_layout->addWidget(create_toolbar_button(*m_toolbar, *m_navigate_forward_action));
-    toolbar_layout->addWidget(create_toolbar_button(*m_toolbar, *m_reload_action));
+    auto* navigation_button_cluster = new QWidget(m_toolbar);
+    navigation_button_cluster->setProperty(WINDOW_DRAG_REGION_PROPERTY, true);
+    auto* navigation_button_layout = new QHBoxLayout(navigation_button_cluster);
+    navigation_button_layout->setSpacing(2);
+    navigation_button_layout->setContentsMargins(0, 0, 0, 0);
+    navigation_button_layout->addWidget(create_toolbar_button(*navigation_button_cluster, *m_toggle_vertical_tabs_expanded_action));
+    m_sidebar_toggle_navigation_spacer = new QSpacerItem(0, 0, QSizePolicy::Fixed, QSizePolicy::Minimum);
+    navigation_button_layout->addItem(m_sidebar_toggle_navigation_spacer);
+    navigation_button_layout->addWidget(create_toolbar_button(*navigation_button_cluster, *m_navigate_back_action));
+    navigation_button_layout->addWidget(create_toolbar_button(*navigation_button_cluster, *m_navigate_forward_action));
+    navigation_button_layout->addWidget(create_toolbar_button(*navigation_button_cluster, *m_reload_action));
+
+    if (use_left_traffic_light_window_controls()) {
+        toolbar_layout->addWidget(m_toolbar_window_controls, 0, Qt::AlignVCenter);
+        m_toolbar_window_controls_spacer = new QSpacerItem(TOOLBAR_MACOS_TRAFFIC_LIGHTS_CONTROL_GAP, 0, QSizePolicy::Fixed, QSizePolicy::Minimum);
+        toolbar_layout->addItem(m_toolbar_window_controls_spacer);
+    }
+    auto* location_edit_container = new QWidget(m_toolbar);
+    location_edit_container->setProperty(WINDOW_DRAG_REGION_PROPERTY, true);
+    auto* location_edit_layout = new QHBoxLayout(location_edit_container);
+    location_edit_layout->setSpacing(0);
+    location_edit_layout->setContentsMargins(TOOLBAR_LOCATION_EDIT_SIDE_GAP, 0, TOOLBAR_LOCATION_EDIT_SIDE_GAP, 0);
+
+    toolbar_layout->addWidget(navigation_button_cluster, 0, Qt::AlignTop);
     m_location_edit->set_trailing_action(create_application_action(*m_location_edit, view().toggle_bookmark_action()));
-    toolbar_layout->addWidget(m_location_edit, 1);
-    toolbar_layout->addWidget(m_hamburger_button);
+    m_location_edit->set_zoom_action(create_application_action(*m_location_edit, view().reset_zoom_action(), IncludeActionIcon::No));
+    location_edit_layout->addWidget(m_location_edit);
+    toolbar_layout->addWidget(location_edit_container, 1);
+    toolbar_layout->addWidget(m_hamburger_button, 0, Qt::AlignTop);
+    if (use_right_custom_window_controls()) {
+        toolbar_layout->addWidget(m_toolbar_window_controls_separator, 0, Qt::AlignVCenter);
+        toolbar_layout->addWidget(m_toolbar_window_controls, 0, Qt::AlignVCenter);
+    }
 
     update_chrome_style();
-
-    m_hamburger_button->setVisible(!Settings::the()->show_menubar());
-
-    QObject::connect(Settings::the(), &Settings::show_menubar_changed, this, [this](bool show_menubar) {
-        m_hamburger_button->setVisible(!show_menubar);
-    });
+    set_toolbar_window_controls_visible(false);
 
     view().on_activate_tab = [this] {
         m_window->activate_tab(tab_index());
@@ -212,22 +266,18 @@ Tab::Tab(BrowserWindow* window, RefPtr<WebView::WebContentClient> parent_client,
         m_title = url_serialized;
         update_tab_title();
 
-        m_favicon = default_favicon();
+        m_favicon = {};
         set_loading(true);
 
-        m_location_edit->set_favicon({});
-        m_location_edit->set_loading(true);
         m_location_edit->set_url(url);
     };
 
     view().on_load_finish = [this](auto const&) {
         set_loading(false);
-        m_location_edit->set_loading(false);
     };
 
     view().on_web_content_crashed = [this] {
         set_loading(false);
-        m_location_edit->set_loading(false);
     };
 
     view().on_url_change = [this](auto const& url) {
@@ -251,7 +301,6 @@ Tab::Tab(BrowserWindow* window, RefPtr<WebView::WebContentClient> parent_client,
 
         m_favicon = qpixmap;
         update_tab_icon();
-        m_location_edit->set_favicon(m_favicon);
     };
 
     view().on_request_alert = [this](auto const& message) {
@@ -438,13 +487,11 @@ Tab::Tab(BrowserWindow* window, RefPtr<WebView::WebContentClient> parent_client,
     };
 
     view().on_fullscreen_window = [this]() {
-        m_toolbar_container->hide();
         m_window->fullscreen_mode().enter(this);
     };
 
     view().on_exit_fullscreen_window = [this]() {
         m_window->fullscreen_mode().exit(FullscreenMode::ExitInitiatedBy::WebContent);
-        m_toolbar_container->show();
     };
 
     view().on_audio_play_state_changed = [this](auto play_state) {
@@ -496,7 +543,7 @@ Tab::Tab(BrowserWindow* window, RefPtr<WebView::WebContentClient> parent_client,
     });
 
     m_context_menu = new QMenu("Context menu", this);
-    m_context_menu->addAction(create_application_action(*this, WebView::Application::the().reload_action(), IncludeActionIcon::No));
+    m_context_menu->addAction(create_application_action(*this, application.reload_action(), IncludeActionIcon::No));
     m_context_menu->addAction(duplicate_tab_action);
     m_context_menu->addSeparator();
     auto* move_tab_menu = m_context_menu->addMenu("Mo&ve Tab");
@@ -528,8 +575,57 @@ void Tab::set_window(BrowserWindow& window)
     m_window = &window;
     m_hamburger_button->setMenu(&m_window->hamburger_menu());
     connect_hamburger_menu();
-    m_hamburger_button->setVisible(!Settings::the()->show_menubar());
     recreate_toolbar_icons();
+}
+
+void Tab::set_vertical_tabs_enabled(bool enabled)
+{
+    m_toolbar->setProperty(WINDOW_DRAG_REGION_PROPERTY, true);
+    if (m_sidebar_toggle_navigation_spacer)
+        m_sidebar_toggle_navigation_spacer->changeSize(enabled ? TOOLBAR_SIDEBAR_TOGGLE_NAVIGATION_GAP : 0, 0, QSizePolicy::Fixed, QSizePolicy::Minimum);
+    m_toolbar->layout()->invalidate();
+}
+
+void Tab::set_toolbar_container_in_tab_layout(bool in_tab_layout)
+{
+    auto* tab_layout = static_cast<QBoxLayout*>(layout());
+    auto index = tab_layout->indexOf(m_toolbar_container);
+
+    if (in_tab_layout) {
+        if (index == -1) {
+            m_toolbar_container->setParent(this);
+            tab_layout->insertWidget(0, m_toolbar_container);
+        }
+        m_toolbar_container->show();
+        return;
+    }
+
+    if (index != -1) {
+        tab_layout->removeWidget(m_toolbar_container);
+        m_toolbar_container->hide();
+    }
+}
+
+void Tab::set_toolbar_window_controls_visible(bool visible)
+{
+    auto const has_left_traffic_lights = use_left_traffic_light_window_controls() && visible;
+    auto const has_trailing_window_controls = use_right_custom_window_controls() && visible;
+
+    m_toolbar_window_controls_separator->setVisible(has_trailing_window_controls);
+    m_toolbar_window_controls->setVisible(has_left_traffic_lights || has_trailing_window_controls);
+    if (m_toolbar_window_controls_spacer)
+        m_toolbar_window_controls_spacer->changeSize(has_left_traffic_lights ? TOOLBAR_MACOS_TRAFFIC_LIGHTS_CONTROL_GAP : 0, 0, QSizePolicy::Fixed, QSizePolicy::Minimum);
+    m_toolbar->layout()->setContentsMargins(TOOLBAR_HORIZONTAL_MARGIN, TOOLBAR_VERTICAL_MARGIN, has_trailing_window_controls ? TOOLBAR_WINDOW_CONTROLS_RIGHT_MARGIN : TOOLBAR_HORIZONTAL_MARGIN, TOOLBAR_VERTICAL_MARGIN);
+    m_toolbar->layout()->invalidate();
+}
+
+void Tab::update_window_control_icons()
+{
+    auto is_maximized = m_window->isMaximized();
+    m_minimize_window_button->setIcon(create_chrome_icon(ChromeIcon::WindowMinimize, palette()));
+    m_maximize_window_button->setIcon(create_chrome_icon(is_maximized ? ChromeIcon::WindowRestore : ChromeIcon::WindowMaximize, palette()));
+    m_maximize_window_button->setToolTip(is_maximized ? "Restore" : "Maximize");
+    m_close_window_button->setIcon(create_chrome_icon(ChromeIcon::WindowClose, palette()));
 }
 
 void Tab::connect_hamburger_menu()
@@ -540,6 +636,14 @@ void Tab::connect_hamburger_menu()
     QObject::connect(&m_window->hamburger_menu(), &QMenu::aboutToHide, m_hamburger_button, [this]() {
         m_hamburger_button->setDown(false);
     });
+
+    update_hamburger_menu();
+}
+
+void Tab::update_hamburger_menu()
+{
+    auto show_menu_bar = show_menubar_option_available() && WebView::Application::settings().show_menu_bar();
+    m_hamburger_button->setVisible(!show_menu_bar);
 }
 
 void Tab::navigate(URL::URL const& url)
@@ -584,6 +688,11 @@ QString Tab::title() const
 void Tab::update_tab_title()
 {
     emit title_changed(tab_index(), title());
+}
+
+void Tab::show_menu_bar_changed()
+{
+    update_hamburger_menu();
 }
 
 void Tab::config_variable_changed(WebView::ConfigVariableID variable)
@@ -682,10 +791,17 @@ void Tab::update_chrome_style()
 
 void Tab::recreate_toolbar_icons()
 {
+    m_toggle_vertical_tabs_expanded_action->setIcon(create_chrome_icon(
+        WebView::Application::settings().tab_settings().vertical_tabs_expanded
+            ? ChromeIcon::VerticalTabBarCollapse
+            : ChromeIcon::VerticalTabBarExpand,
+        palette()));
     m_navigate_back_action->setIcon(create_chrome_icon(ChromeIcon::Back, palette()));
     m_navigate_forward_action->setIcon(create_chrome_icon(ChromeIcon::Forward, palette()));
     m_reload_action->setIcon(create_chrome_icon(ChromeIcon::Reload, palette()));
     m_hamburger_button->setIcon(create_chrome_icon(ChromeIcon::Menu, palette()));
+    update_window_control_icons();
+
     if (auto* action = m_location_edit->trailing_action()) {
         auto icon = view().toggle_bookmark_action().engaged() ? ChromeIcon::StarFilled : ChromeIcon::Star;
         action->setIcon(create_chrome_icon(icon, palette()));

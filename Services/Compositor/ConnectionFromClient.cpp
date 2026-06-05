@@ -7,7 +7,7 @@
 #include <AK/IDAllocator.h>
 #include <Compositor/ConnectionFromClient.h>
 #include <Compositor/ConnectionFromWebContent.h>
-#include <LibCore/EventLoop.h>
+#include <LibCore/Process.h>
 #include <LibCore/System.h>
 #include <LibIPC/Transport.h>
 
@@ -26,7 +26,7 @@ void ConnectionFromClient::die()
 {
     for (auto& [id, connection] : m_web_content_connections)
         connection->notify_compositor_lost();
-    Core::EventLoop::current().quit(0);
+    Core::Process::terminate_immediately(0);
 }
 
 void ConnectionFromClient::did_allocate_backing_stores(Web::Compositor::CompositorContextId context_id, i32 front_bitmap_id, Gfx::SharedImage&& front_backing_store, i32 back_bitmap_id, Gfx::SharedImage&& back_backing_store)
@@ -62,11 +62,11 @@ Messages::CompositorControlServer::ConnectWebContentResponse ConnectionFromClien
     return { move(paired_transport.remote_handle), web_content_connection_id };
 }
 
-void ConnectionFromClient::create_context(Web::Compositor::CompositorContextId context_id, Optional<u64> page_id, Web::Compositor::PagePresentationRegistration page_presentation_registration, i32 web_content_connection_id)
+void ConnectionFromClient::create_context(Web::Compositor::CompositorContextId context_id, Optional<u64> page_id, i32 web_content_connection_id)
 {
     auto* connection = web_content_connection(web_content_connection_id);
     VERIFY(connection);
-    m_compositor_state->create_context(context_id, page_id, page_presentation_registration, *connection);
+    m_compositor_state->create_context(context_id, page_id, *connection);
 }
 
 void ConnectionFromClient::viewport_size_updated(Web::Compositor::CompositorContextId context_id, Gfx::IntSize viewport_size, Web::Compositor::WindowResizingInProgress window_resize_in_progress)
@@ -97,6 +97,12 @@ Messages::CompositorControlServer::AsyncScrollByResponse ConnectionFromClient::a
 void ConnectionFromClient::presented_bitmap_ready_to_paint(Web::Compositor::CompositorContextId context_id, i32 bitmap_id)
 {
     m_compositor_state->presented_bitmap_ready_to_paint(context_id, bitmap_id);
+}
+
+void ConnectionFromClient::crash()
+{
+    warnln("Crashing Compositor process by request from Browser");
+    VERIFY_NOT_REACHED();
 }
 
 ConnectionFromWebContent* ConnectionFromClient::web_content_connection(i32 web_content_connection_id)

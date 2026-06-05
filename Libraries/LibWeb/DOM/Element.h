@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <AK/Concepts.h>
 #include <AK/Optional.h>
 #include <LibGfx/DecodedImageFrame.h>
 #include <LibWeb/ARIA/ARIAMixin.h>
@@ -191,7 +192,7 @@ public:
     virtual bool supports_dimension_attributes() const { return false; }
 
     virtual bool is_presentational_hint(FlyString const&) const { return false; }
-    virtual void apply_presentational_hints(Vector<CSS::StyleProperty>&) const { }
+    virtual void apply_presentational_hints(Vector<CSS::StyleProperty>&) const;
 
     void run_attribute_change_steps(FlyString const& local_name, Optional<String> const& old_value, Optional<String> const& value, Optional<FlyString> const& namespace_);
 
@@ -370,7 +371,6 @@ public:
 
     static GC::Ptr<Layout::NodeWithStyle> create_layout_node_for_display_type(DOM::Document&, CSS::Display const&, GC::Ref<CSS::ComputedProperties>, Element*);
 
-    [[nodiscard]] bool affected_by_pseudo_class(CSS::PseudoClass) const;
     void clear_removed_attributes_for_style_invalidation() { m_removed_attributes_for_style_invalidation.clear(); }
     bool has_removed_attribute_for_style_invalidation(FlyString const& attribute_name) const
     {
@@ -388,8 +388,8 @@ public:
     GC::Ptr<Layout::NodeWithStyle> pseudo_element_unsafe_layout_node(CSS::PseudoElement) const;
 
     bool has_synthetic_pseudo_elements() const;
-    void clear_synthetic_pseudo_element_layout_nodes(Badge<Layout::TreeBuilder>) { clear_synthetic_pseudo_element_layout_nodes(); }
-    void clear_synthetic_pseudo_element_layout_nodes(Badge<Document>) { clear_synthetic_pseudo_element_layout_nodes(); }
+    template<OneOf<Layout::TreeBuilder, Document, Node> T>
+    void clear_synthetic_pseudo_element_layout_nodes(Badge<T>) { clear_synthetic_pseudo_element_layout_nodes(); }
 
     void serialize_children_as_json(JsonObjectSerializer<StringBuilder>&) const;
 
@@ -531,6 +531,7 @@ public:
     bool matches_unchecked_pseudo_class() const;
     bool matches_placeholder_shown_pseudo_class() const;
     bool matches_link_pseudo_class() const;
+    bool matches_visited_pseudo_class() const;
     bool matches_local_link_pseudo_class() const;
     bool matches_focus_within_pseudo_class() const;
 

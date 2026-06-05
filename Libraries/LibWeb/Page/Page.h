@@ -125,7 +125,7 @@ public:
     EventResult handle_drag_and_drop_event(DragEvent::Type, DevicePixelPoint, DevicePixelPoint screen_position, unsigned button, unsigned buttons, unsigned modifiers, Vector<HTML::SelectedFile> files);
     EventResult handle_pinch_event(DevicePixelPoint point, unsigned modifiers, double scale);
 
-    EventResult handle_keydown(UIEvents::KeyCode, unsigned modifiers, u32 code_point, bool repeat);
+    EventResult handle_keydown(UIEvents::KeyCode, unsigned modifiers, u32 code_point, bool repeat, bool should_insert_text);
     EventResult handle_keyup(UIEvents::KeyCode, unsigned modifiers, u32 code_point, bool repeat);
 
     void handle_sdl_input_events();
@@ -414,6 +414,8 @@ public:
     virtual Page& page() = 0;
     virtual Page const& page() const = 0;
     virtual bool is_connection_open() const = 0;
+    virtual bool has_focus() const { return true; }
+    virtual bool has_active_devtools_client() const { return false; }
     virtual bool is_url_suitable_for_same_process_navigation([[maybe_unused]] URL::URL const& current_url, [[maybe_unused]] URL::URL const& target_url) const { return true; }
     virtual void request_new_process_for_navigation(URL::URL const&) { }
     virtual Gfx::Palette palette() const = 0;
@@ -431,9 +433,7 @@ public:
     {
         if (page_presentation_registration == Compositor::PagePresentationRegistration::Yes)
             return Compositor::compositor_context_id_for_page(id());
-        auto context_id = Compositor::allocate_compositor_context_id();
-        VERIFY(!Compositor::is_page_presenting_compositor_context_id(context_id));
-        return context_id;
+        VERIFY_NOT_REACHED();
     }
     virtual void request_frame() = 0;
     virtual void page_did_change_title(Utf16String const&) { }

@@ -21,6 +21,7 @@ QColor chrome_surface(QPalette const&);
 QColor chrome_surface_recessed(QPalette const&);
 QColor chrome_surface_hover(QPalette const&);
 QColor chrome_surface_pressed(QPalette const&);
+QColor chrome_control_border(QPalette const&);
 QColor chrome_active_tab_surface_top(QPalette const&);
 QColor chrome_active_tab_surface_bottom(QPalette const&);
 QColor chrome_border(QPalette const&);
@@ -34,7 +35,7 @@ QString menu_bar_style_sheet(QPalette const&);
 QString location_edit_style_sheet(QPalette const&);
 QString bookmarks_bar_style_sheet(QPalette const&);
 QString find_in_page_style_sheet(QPalette const&);
-QString status_bar_style_sheet(QPalette const&);
+QString devtools_banner_style_sheet(QPalette const&);
 QString tab_widget_style_sheet(QPalette const&);
 QString autocomplete_popup_style_sheet(QPalette const&);
 

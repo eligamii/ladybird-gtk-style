@@ -34,6 +34,9 @@ public:
 
     virtual Vector<TabDescription> tab_list() const { return {}; }
     virtual Vector<CSSProperty> css_property_list() const { return {}; }
+    virtual void navigate_tab(TabDescription const&, String const&) const { }
+    virtual void reload_tab(TabDescription const&, bool bypass_cache) const { (void)bypass_cache; }
+    virtual void traverse_the_history_by_delta(TabDescription const&, int) const { }
 
     using OnTabInspectionComplete = Function<void(ErrorOr<JsonValue>)>;
     virtual void inspect_tab(TabDescription const&, OnTabInspectionComplete) const { }
@@ -44,7 +47,7 @@ public:
     using OnDOMNodePropertiesReceived = Function<void(WebView::DOMNodeProperties)>;
     virtual void listen_for_dom_properties(TabDescription const&, OnDOMNodePropertiesReceived) const { }
     virtual void stop_listening_for_dom_properties(TabDescription const&) const { }
-    virtual void inspect_dom_node(TabDescription const&, WebView::DOMNodeProperties::Type, Web::UniqueNodeID, Optional<Web::CSS::PseudoElement>) const { }
+    virtual void inspect_dom_node(TabDescription const&, WebView::DOMNodeProperties::Type, Web::UniqueNodeID, Optional<Web::CSS::PseudoElement>, JsonObject options = {}) const { (void)options; }
     virtual void clear_inspected_dom_node(TabDescription const&) const { }
 
     struct NodePickerEvent {
