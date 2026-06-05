@@ -49,7 +49,7 @@ jobs:
 
     steps:
       - name: Checkout LadybirdBrowser/ladybird
-        uses: actions/checkout@v6.0.2
+        uses: actions/checkout@v6.0.3
         with:
           ref: ${{ inputs.reference_to_build }}
 
@@ -178,3 +178,11 @@ jobs:
           name: ladybird-wasm-${{ matrix.package_type }}
           path: Build/distribution/ladybird-wasm-*.tar.gz
           retention-days: 7
+
+      - name: Upload cranelift-compiler binary
+        uses: actions/upload-artifact@v7
+        with:
+          name: ladybird-cranelift-compiler-${{ matrix.package_type }}
+          path: Build/distribution/bin/cranelift-compiler
+          retention-days: 7
+          if-no-files-found: ignore
