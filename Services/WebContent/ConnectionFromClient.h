@@ -9,6 +9,7 @@
 #pragma once
 
 #include <AK/HashMap.h>
+#include <AK/JsonObject.h>
 #include <AK/JsonValue.h>
 #include <AK/Queue.h>
 #include <AK/RefPtr.h>
@@ -66,6 +67,7 @@ private:
     Optional<PageClient const&> page(u64 index, SourceLocation = SourceLocation::current()) const;
 
     virtual Messages::WebContentServer::InitTransportResponse init_transport(int peer_pid) override;
+    virtual void initialize(u64 initial_page_id) override;
     virtual void close_server() override;
     virtual Messages::WebContentServer::GetWindowHandleResponse get_window_handle(u64 page_id) override;
     virtual void set_window_handle(u64 page_id, String handle) override;
@@ -90,7 +92,7 @@ private:
     virtual void debug_request(u64 page_id, ByteString, ByteString) override;
     virtual void get_source(u64 page_id) override;
     virtual void inspect_dom_tree(u64 page_id) override;
-    virtual void inspect_dom_node(u64 page_id, WebView::DOMNodeProperties::Type, Web::UniqueNodeID node_id, Optional<Web::CSS::PseudoElement> pseudo_element) override;
+    virtual void inspect_dom_node(u64 page_id, WebView::DOMNodeProperties::Type, Web::UniqueNodeID node_id, Optional<Web::CSS::PseudoElement> pseudo_element, JsonValue options) override;
     virtual void inspect_grid_layouts(u64 page_id, Web::UniqueNodeID root_node_id) override;
     virtual void inspect_current_grid(u64 page_id, Web::UniqueNodeID node_id) override;
     virtual void inspect_current_flexbox(u64 page_id, Web::UniqueNodeID node_id, bool only_look_at_parents) override;

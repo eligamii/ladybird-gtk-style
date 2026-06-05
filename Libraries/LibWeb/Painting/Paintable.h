@@ -17,10 +17,10 @@
 #include <LibWeb/Forward.h>
 #include <LibWeb/InvalidateDisplayList.h>
 #include <LibWeb/Painting/ChromeWidget.h>
+#include <LibWeb/Painting/HitTestResult.h>
 #include <LibWeb/Painting/ShadowData.h>
 #include <LibWeb/PixelUnits.h>
 #include <LibWeb/RefCountedTreeNode.h>
-#include <LibWeb/TraversalDecision.h>
 
 namespace Web::Painting {
 
@@ -33,29 +33,6 @@ enum class PaintPhase {
     Overlay,
 };
 
-struct HitTestResult {
-    NonnullRefPtr<Paintable> paintable;
-    RefPtr<ChromeWidget> chrome_widget {};
-    size_t index_in_node { 0 };
-    Optional<CSSPixels> vertical_distance {};
-    Optional<CSSPixels> horizontal_distance {};
-    enum InternalPosition {
-        None,
-        Before,
-        Inside,
-        After,
-    };
-    InternalPosition internal_position { None };
-
-    DOM::Node* dom_node();
-    DOM::Node const* dom_node() const;
-};
-
-enum class HitTestType {
-    Exact,      // Exact matches only
-    TextCursor, // Clicking past the right/bottom edge of text will still hit the text
-};
-
 class WEB_API Paintable
     : public RefCounted<Paintable>
     , public Weakable<Paintable>
@@ -65,8 +42,6 @@ public:
     virtual ~Paintable();
 
     virtual StringView class_name() const { return "Paintable"sv; }
-
-    void detach_from_layout_node();
 
     [[nodiscard]] bool is_visible() const
     {
@@ -86,8 +61,6 @@ public:
 
     virtual void paint(DisplayListRecordingContext&, PaintPhase) const { }
     void paint_inspector_overlay(DisplayListRecordingContext&) const;
-
-    [[nodiscard]] virtual TraversalDecision hit_test(CSSPixelPoint, HitTestType, Function<TraversalDecision(HitTestResult)> const& callback) const;
 
     virtual bool forms_unconnected_subtree() const { return false; }
 
@@ -172,6 +145,7 @@ protected:
     explicit Paintable(Layout::Node const&);
 
     void paint_with_inspector_overlay_context(DisplayListRecordingContext&, Function<void()> const&) const;
+    bool has_layout_node() const { return m_layout_node; }
 
     virtual void paint_inspector_overlay_internal(DisplayListRecordingContext&) const { }
     Optional<WeakPtr<PaintableBox>> mutable m_containing_block;
@@ -190,16 +164,6 @@ private:
     bool m_inline : 1 { false };
     CSS::Display m_display;
 };
-
-inline DOM::Node* HitTestResult::dom_node()
-{
-    return paintable->dom_node();
-}
-
-inline DOM::Node const* HitTestResult::dom_node() const
-{
-    return paintable->dom_node();
-}
 
 template<>
 inline bool Paintable::fast_is<PaintableBox>() const { return is_paintable_box(); }

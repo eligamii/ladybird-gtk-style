@@ -95,6 +95,7 @@ public:
     void reset_zoom();
     double zoom_level() const { return m_zoom_level; }
     double device_pixel_ratio() const { return m_device_pixel_ratio; }
+    Optional<u64> display_id() const { return m_display_id; }
     double maximum_frames_per_second() const { return m_maximum_frames_per_second; }
 
     void enqueue_input_event(Web::InputEvent);
@@ -130,7 +131,7 @@ public:
     void node_picker_preview(Web::DevicePixelPoint);
     void node_picker_cancel();
 
-    void inspect_dom_node(Web::UniqueNodeID node_id, DOMNodeProperties::Type, Optional<Web::CSS::PseudoElement> pseudo_element);
+    void inspect_dom_node(Web::UniqueNodeID node_id, DOMNodeProperties::Type, Optional<Web::CSS::PseudoElement> pseudo_element, JsonValue options = {});
     void inspect_grid_layouts(Web::UniqueNodeID root_node_id);
     void inspect_current_grid(Web::UniqueNodeID node_id);
     void inspect_current_flexbox(Web::UniqueNodeID node_id, bool only_look_at_parents);
@@ -209,9 +210,6 @@ public:
     ErrorOr<LexicalPath> dump_gc_graph();
 
     void set_user_style_sheet(String const& source);
-    // Load Native.css as the User style sheet, which attempts to make WebView content look as close to
-    // native GUI widgets as possible.
-    void use_native_user_style_sheet();
 
     void request_close();
     Function<void()> prepare_for_immediate_close();
@@ -378,6 +376,7 @@ protected:
 
     double m_zoom_level { 1.0 };
     double m_device_pixel_ratio { 1.0 };
+    Optional<u64> m_display_id;
     double m_maximum_frames_per_second { 60.0 };
 
     RefPtr<Menu> m_page_context_menu;

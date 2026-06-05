@@ -92,7 +92,7 @@ public:
     void set_accumulated_visual_context(VisualContextIndex index) { m_accumulated_visual_context_index = index; }
     VisualContextIndex accumulated_visual_context() const { return m_accumulated_visual_context_index; }
 
-    void replay_cached_commands(DisplayListCommandSequence const& commands);
+    void replay_cached_commands(ReadonlyBytes commands);
 
     class CommandCapture {
         AK_MAKE_NONCOPYABLE(CommandCapture);
@@ -103,7 +103,7 @@ public:
         {
         }
         ~CommandCapture();
-        DisplayListCommandSequence take();
+        ByteBuffer take();
 
     private:
         friend class DisplayListRecorder;
@@ -144,6 +144,7 @@ public:
     void compositor_scroll_node(CompositorScrollNode const&);
     void compositor_sticky_area(CompositorStickyArea const&);
     void compositor_wheel_hit_test_target(CompositorWheelHitTestTarget const&);
+    void compositor_wheel_hit_test_target_with_corner_radii(CompositorWheelHitTestTargetWithCornerRadii const&);
     void set_async_scrolling_metadata(DisplayList::AsyncScrollingMetadata);
     void compositor_main_thread_wheel_event_region(CompositorMainThreadWheelEventRegion const&);
     void compositor_viewport_scrollbar(CompositorViewportScrollbar const&);
@@ -168,7 +169,7 @@ private:
         m_display_list.append(command, m_visual_context_tree, m_accumulated_visual_context_index, inline_data);
     }
 
-    VisualContextIndex m_accumulated_visual_context_index {};
+    VisualContextIndex m_accumulated_visual_context_index { VISUAL_VIEWPORT_NODE_INDEX };
     DisplayList& m_display_list;
     AccumulatedVisualContextTree const& m_visual_context_tree;
     DisplayListResourceStorage& m_resource_storage;

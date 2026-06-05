@@ -20,7 +20,7 @@ jobs:
         arch: ['x86_64']
         package_type: ['Linux-x86_64']
         runner_labels: ['["ubuntu-24.04-internal", "js-benchmarks", "self-hosted"]']
-        container: [&ci_container '{"image":"ghcr.io/ladybirdbrowser/ladybird-ci:2026.05.25"}']
+        container: [&ci_container '{"image":"ghcr.io/ladybirdbrowser/ladybird-ci:2026.06.02"}']
 
         include:
           - os_name: 'macOS'
@@ -35,7 +35,7 @@ jobs:
 
     steps:
       - name: 'Checkout LadybirdBrowser/js-benchmarks'
-        uses: actions/checkout@v6.0.2
+        uses: actions/checkout@v6.0.3
         with:
           repository: LadybirdBrowser/js-benchmarks
           path: js-benchmarks
@@ -82,6 +82,20 @@ jobs:
         run: |
           cd wasm-repl
           tar -xvzf ladybird-wasm-${{ matrix.os_name }}-${{ matrix.arch }}.tar.gz
+
+      - name: 'Download cranelift-compiler artifact'
+        uses: dawidd6/action-download-artifact@v21
+        with:
+          run_id: ${{ github.event.workflow_run.id }}
+          name: ladybird-cranelift-compiler-${{ matrix.package_type }}
+          path: cranelift-compiler
+          if_no_artifact_found: warn
+
+      - name: 'Install cranelift-compiler next to wasm'
+        if: ${{ hashFiles('cranelift-compiler/cranelift-compiler') != '' && hashFiles('wasm-repl/bin/wasm') != '' }}
+        shell: bash
+        run: |
+          install -m 0755 cranelift-compiler/cranelift-compiler wasm-repl/bin/cranelift-compiler
 
       - name: 'Run the benchmarks'
         shell: bash

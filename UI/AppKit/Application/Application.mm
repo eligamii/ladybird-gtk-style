@@ -27,7 +27,7 @@ namespace Ladybird {
 
 Application::Application() = default;
 
-NonnullOwnPtr<Core::EventLoop> Application::create_platform_event_loop()
+Core::EventLoop& Application::create_platform_event_loop()
 {
     if (!browser_options().headless_mode.has_value()) {
         Core::EventLoopManager::install(*new EventLoopManagerMacOS);
@@ -168,12 +168,6 @@ void Application::rebuild_bookmarks_menu() const
 {
     ApplicationDelegate* delegate = [NSApp delegate];
     [delegate rebuildBookmarksMenu];
-}
-
-void Application::update_bookmarks_bar_display(bool show_bookmarks_bar) const
-{
-    ApplicationDelegate* delegate = [NSApp delegate];
-    [delegate updateBookmarksBarDisplay:show_bookmarks_bar];
 }
 
 void Application::show_bookmark_context_menu(Gfx::IntPoint content_position, Optional<WebView::BookmarkItem const&> item, Optional<String const&> target_folder_id)

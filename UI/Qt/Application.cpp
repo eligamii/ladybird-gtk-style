@@ -9,6 +9,9 @@
 #include <UI/Qt/Application.h>
 #include <UI/Qt/ChromeStyle.h>
 #include <UI/Qt/EventLoopImplementationQt.h>
+#if defined(AK_OS_MACOS)
+#    include <UI/Qt/MacWindow.h>
+#endif
 #include <UI/Qt/Settings.h>
 #include <UI/Qt/StringUtils.h>
 #include <UI/Qt/WebContentView.h>
@@ -63,6 +66,9 @@ public:
     explicit LadybirdQApplication(Main::Arguments& arguments)
         : QApplication(arguments.argc, arguments.argv)
     {
+#if defined(AK_OS_MACOS)
+        install_appkit_event_capture();
+#endif
         update_chrome_style();
     }
 
@@ -118,17 +124,17 @@ void Application::create_platform_options(WebView::BrowserOptions&, WebView::Req
     web_content_options.config_path = Settings::the()->directory();
 }
 
-NonnullOwnPtr<Core::EventLoop> Application::create_platform_event_loop()
+Core::EventLoop& Application::create_platform_event_loop()
 {
     if (!browser_options().headless_mode.has_value()) {
         Core::EventLoopManager::install(*new EventLoopManagerQt);
         m_application = make<LadybirdQApplication>(arguments());
     }
 
-    auto event_loop = WebView::Application::create_platform_event_loop();
+    auto& event_loop = WebView::Application::create_platform_event_loop();
 
     if (!browser_options().headless_mode.has_value())
-        static_cast<EventLoopImplementationQt&>(event_loop->impl()).set_main_loop();
+        static_cast<EventLoopImplementationQt&>(event_loop.impl()).set_main_loop();
 
     return event_loop;
 }
@@ -137,9 +143,9 @@ BrowserWindow& Application::new_window(Vector<URL::URL> const& initial_urls, Win
 {
     auto* window = new BrowserWindow(initial_urls, is_popup_window, parent_tab, move(page_index));
     set_active_window(*window);
-    if (initial_urls.is_empty()) {
-        auto* tab = window->current_tab();
-        if (tab) {
+
+    if (initial_urls.size() == 1 && initial_urls.first() == URL::about_newtab()) {
+        if (auto* tab = window->current_tab()) {
             tab->set_url_is_hidden(true);
             tab->focus_location_editor();
         }
@@ -297,19 +303,19 @@ void Application::insert_clipboard_entry(Web::Clipboard::SystemClipboardRepresen
     clipboard->setMimeData(mime_data);
 }
 
+void Application::update_tabs_display() const
+{
+    for (auto* widget : QApplication::topLevelWidgets()) {
+        if (auto* window = as_if<BrowserWindow>(widget))
+            window->update_tabs_display();
+    }
+}
+
 void Application::rebuild_bookmarks_menu() const
 {
     for (auto* widget : QApplication::topLevelWidgets()) {
         if (auto* window = as_if<BrowserWindow>(widget))
             window->rebuild_bookmarks_menu();
-    }
-}
-
-void Application::update_bookmarks_bar_display(bool show_bookmarks_bar) const
-{
-    for (auto* widget : QApplication::topLevelWidgets()) {
-        if (auto* window = as_if<BrowserWindow>(widget))
-            window->update_bookmarks_bar_display(show_bookmarks_bar);
     }
 }
 

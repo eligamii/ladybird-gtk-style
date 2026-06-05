@@ -137,6 +137,7 @@ pub struct CompiledProgram {
     parsed: ParsedProgram,
     bytecode: CompiledProgramBytecode,
     declaration_functions: Vec<PendingSharedFunctionData>,
+    source_len: usize,
 }
 
 pub struct CompiledFunction {
@@ -745,6 +746,7 @@ fn compile_parsed_program_off_thread_impl(
                 parsed: *parsed,
                 bytecode,
                 declaration_functions,
+                source_len,
             }))
         })
     }
@@ -918,6 +920,25 @@ pub unsafe extern "C" fn rust_free_decoded_bytecode_cache_blob(blob: *mut Decode
     }
 }
 
+/// Validate a decoded bytecode cache blob before materializing it.
+///
+/// # Safety
+/// `blob` must be a valid pointer from `rust_decode_bytecode_cache_blob_with_owner()`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_validate_decoded_bytecode_cache_blob(
+    blob: *mut DecodedBytecodeCacheBlob,
+    source_len: usize,
+) -> bool {
+    unsafe {
+        abort_on_panic(|| {
+            if blob.is_null() {
+                return false;
+            }
+            (*blob)._blob.validate_for_materialization(source_len).is_ok()
+        })
+    }
+}
+
 /// Materialize a decoded script bytecode cache blob. Consumes and frees the blob.
 ///
 /// # Safety
@@ -939,8 +960,8 @@ pub unsafe extern "C" fn rust_materialize_bytecode_cache_script(
             if blob.is_null() {
                 return std::ptr::null_mut();
             }
-            let blob = Box::from_raw(blob);
-            if !blob._blob.source_ranges_are_valid(source_len) {
+            let mut blob = Box::from_raw(blob);
+            if blob._blob.validate_for_materialization(source_len).is_err() {
                 return std::ptr::null_mut();
             }
             blob._blob
@@ -973,8 +994,8 @@ pub unsafe extern "C" fn rust_materialize_bytecode_cache_module(
             if blob.is_null() {
                 return std::ptr::null_mut();
             }
-            let blob = Box::from_raw(blob);
-            if !blob._blob.source_ranges_are_valid(source_len) {
+            let mut blob = Box::from_raw(blob);
+            if blob._blob.validate_for_materialization(source_len).is_err() {
                 return std::ptr::null_mut();
             }
             blob._blob.materialize_module(
@@ -1015,7 +1036,7 @@ pub unsafe extern "C" fn rust_install_bytecode_cache_script(
             if blob.is_null() {
                 return std::ptr::null_mut();
             }
-            let blob = Box::from_raw(blob);
+            let mut blob = Box::from_raw(blob);
             let existing_declaration_functions = if existing_declaration_function_count == 0 {
                 &[]
             } else {
@@ -1024,7 +1045,7 @@ pub unsafe extern "C" fn rust_install_bytecode_cache_script(
                 }
                 std::slice::from_raw_parts(existing_declaration_function_ptrs, existing_declaration_function_count)
             };
-            if !blob._blob.source_ranges_are_valid(source_len) {
+            if blob._blob.validate_for_materialization(source_len).is_err() {
                 return std::ptr::null_mut();
             }
             blob._blob.install_script(
@@ -1066,7 +1087,7 @@ pub unsafe extern "C" fn rust_install_bytecode_cache_module(
             if blob.is_null() {
                 return std::ptr::null_mut();
             }
-            let blob = Box::from_raw(blob);
+            let mut blob = Box::from_raw(blob);
             let existing_declaration_functions = if existing_declaration_function_count == 0 {
                 &[]
             } else {
@@ -1075,7 +1096,7 @@ pub unsafe extern "C" fn rust_install_bytecode_cache_module(
                 }
                 std::slice::from_raw_parts(existing_declaration_function_ptrs, existing_declaration_function_count)
             };
-            if !blob._blob.source_ranges_are_valid(source_len) {
+            if blob._blob.validate_for_materialization(source_len).is_err() {
                 return std::ptr::null_mut();
             }
             blob._blob.install_module(

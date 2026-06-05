@@ -16,6 +16,7 @@
 #include <LibWeb/DOM/ShadowRoot.h>
 #include <LibWeb/SVG/SVGDescElement.h>
 #include <LibWeb/SVG/SVGElement.h>
+#include <LibWeb/SVG/SVGForeignObjectElement.h>
 #include <LibWeb/SVG/SVGSVGElement.h>
 #include <LibWeb/SVG/SVGSymbolElement.h>
 #include <LibWeb/SVG/SVGTitleElement.h>
@@ -57,7 +58,7 @@ struct NamedPropertyID {
 static ReadonlySpan<NamedPropertyID> attribute_style_properties()
 {
     // https://svgwg.org/svg2-draft/styling.html#PresentationAttributes
-    static Array const properties = {
+    static auto const& properties = *new Array {
         // FIXME: The `fill` attribute and CSS `fill` property are not the same! But our support is limited enough that they are equivalent for now.
         NamedPropertyID(CSS::PropertyID::Fill),
         // FIXME: The `stroke` attribute and CSS `stroke` property are not the same! But our support is limited enough that they are equivalent for now.
@@ -238,16 +239,16 @@ void SVGElement::update_use_elements_that_reference_this()
         || !id().has_value()
         // An unconnected node cannot have valid references.
         // This also prevents searches for elements that are in the process of being constructed - as clones.
-        || !this->is_connected()
-        // Each use element already listens for the completely_loaded event and then clones its reference,
-        // we do not have to also clone it in the process of initial DOM building.
-        || !document().is_completely_loaded()) {
+        || !this->is_connected()) {
 
         return;
     }
 
     document().for_each_in_subtree_of_type<SVGUseElement>([this](SVGUseElement& use_element) {
-        use_element.svg_element_changed(*this);
+        if (document().is_completely_loaded())
+            use_element.svg_element_changed(*this);
+        else
+            use_element.svg_element_changed_before_document_complete(*this);
         return TraversalDecision::Continue;
     });
 }
@@ -287,12 +288,22 @@ void SVGElement::adjust_computed_style(CSS::ComputedProperties& computed_propert
 {
     Base::adjust_computed_style(computed_properties);
 
-    // The outermost <svg> element (no ancestor <svg>) participates in CSS box layout
-    // and may be positioned. All other SVG elements, including nested <svg> elements,
-    // use SVG's coordinate system and must be forced to position:static.
-    if (is<SVGSVGElement>(*this) && !owner_svg_element())
-        return;
+    // An <svg> element that is not in SVG layout participates in CSS box layout
+    // and may be positioned. That includes the outermost <svg>, and <svg>
+    // elements in HTML content inside <foreignObject>.
+    if (is<SVGSVGElement>(*this)) {
+        for (auto ancestor = parent_element(); ancestor; ancestor = ancestor->parent_element()) {
+            if (is<SVGForeignObjectElement>(*ancestor))
+                return;
+            if (is<SVGSVGElement>(*ancestor))
+                break;
+        }
+        if (!owner_svg_element())
+            return;
+    }
 
+    // SVG elements in SVG layout use SVG's coordinate system and must be forced
+    // to position: static.
     computed_properties.set_property(CSS::PropertyID::Position, CSS::KeywordStyleValue::create(CSS::Keyword::Static));
 }
 

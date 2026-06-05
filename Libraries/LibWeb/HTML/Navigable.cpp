@@ -6,6 +6,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/NeverDestroyed.h>
 #include <LibCore/Timer.h>
 #include <LibWeb/CSS/ComputedProperties.h>
 #include <LibWeb/CSS/PseudoElement.h>
@@ -248,8 +249,8 @@ void PopulateSessionHistoryEntryDocumentOutput::visit_edges(Cell::Visitor& visit
 
 HashTable<GC::RawRef<Navigable>>& all_navigables()
 {
-    static HashTable<GC::RawRef<Navigable>> set;
-    return set;
+    static NeverDestroyed<HashTable<GC::RawRef<Navigable>>> set;
+    return *set;
 }
 
 // https://html.spec.whatwg.org/multipage/document-sequences.html#child-navigable
@@ -295,8 +296,7 @@ Navigable::~Navigable() = default;
 
 void Navigable::set_has_been_destroyed()
 {
-    if (m_async_scroll_hover_update_timer)
-        m_async_scroll_hover_update_timer->stop();
+    cancel_hover_update_after_async_scroll();
     destroy_compositor_context();
     m_has_been_destroyed = true;
     resolve_all_pending_async_scroll_operations();
@@ -304,8 +304,7 @@ void Navigable::set_has_been_destroyed()
 
 void Navigable::remove_from_all_navigables()
 {
-    if (m_async_scroll_hover_update_timer)
-        m_async_scroll_hover_update_timer->stop();
+    cancel_hover_update_after_async_scroll();
     destroy_compositor_context();
     resolve_all_pending_async_scroll_operations();
 
@@ -316,8 +315,7 @@ void Navigable::remove_from_all_navigables()
 
 void Navigable::finalize()
 {
-    if (m_async_scroll_hover_update_timer)
-        m_async_scroll_hover_update_timer->stop();
+    cancel_hover_update_after_async_scroll();
     destroy_compositor_context();
     all_navigables().remove(*this);
     Base::finalize();
@@ -434,8 +432,10 @@ void Navigable::initialize_navigable(NonnullRefPtr<DocumentState> document_state
 
     // 5. Set navigable's parent to parent.
     m_parent = parent;
-    if (parent)
+    if (parent) {
         m_should_show_line_box_borders = parent->m_should_show_line_box_borders;
+        m_should_show_caret_hit_test_debug_overlay = parent->m_should_show_caret_hit_test_debug_overlay;
+    }
     if (parent && !m_is_svg_page && has_compositor_context() && parent->has_compositor_context()) {
         m_compositor_surface_id = Painting::allocate_compositor_surface_id();
         compositor_context().set_presentation_mode(Compositor::PublishToCompositorSurface {
@@ -483,8 +483,11 @@ void Navigable::activate_history_entry(RefPtr<SessionHistoryEntry> entry, GC::Re
 
     // 4. Set navigable's active session history entry to entry.
     m_active_session_history_entry = entry;
-    if (m_active_document && m_active_document != new_document)
+    if (m_active_document && m_active_document != new_document) {
+        // The pending post-scroll hover refresh belongs to the outgoing document; drop it.
+        cancel_hover_update_after_async_scroll();
         m_active_document->set_navigable(nullptr);
+    }
     m_active_document = new_document;
     new_document->set_navigable(this);
     set_needs_to_record_display_list();
@@ -534,8 +537,11 @@ Optional<UniqueNodeID> Navigable::active_document_id() const
 
 void Navigable::set_active_document(GC::Ptr<DOM::Document> document)
 {
-    if (m_active_document && m_active_document != document)
+    if (m_active_document && m_active_document != document) {
+        // The pending post-scroll hover refresh belongs to the outgoing document; drop it.
+        cancel_hover_update_after_async_scroll();
         m_active_document->set_navigable(nullptr);
+    }
     m_active_document = document;
     if (document)
         document->set_navigable(this);
@@ -2910,8 +2916,7 @@ CSSPixelPoint Navigable::to_top_level_position(CSSPixelPoint a_position)
         if (!paintable)
             return {};
 
-        if (auto const* paintable_box = as_if<Painting::PaintableBox>(*paintable);
-            paintable_box && paintable_box->accumulated_visual_context_index().value()) {
+        if (auto const* paintable_box = as_if<Painting::PaintableBox>(*paintable)) {
             auto point = paintable_box->absolute_position();
             point.translate_by(position);
             position = paintable_box->transform_rect_to_viewport({ point, { 0, 0 } }).location();
@@ -3177,6 +3182,12 @@ void Navigable::update_hover_after_async_scroll_stops()
     event_handler().update_hover_after_scroll();
 }
 
+void Navigable::cancel_hover_update_after_async_scroll()
+{
+    if (m_async_scroll_hover_update_timer)
+        m_async_scroll_hover_update_timer->stop();
+}
+
 // https://html.spec.whatwg.org/multipage/webappapis.html#rendering-opportunity
 bool Navigable::has_a_rendering_opportunity() const
 {
@@ -3236,6 +3247,8 @@ void Navigable::inform_the_navigation_api_about_aborting_navigation()
 
 bool Navigable::is_focused() const
 {
+    if (!m_page->client().has_focus())
+        return false;
     return &m_page->focused_navigable() == this;
 }
 
@@ -3444,6 +3457,21 @@ void Navigable::set_should_show_line_box_borders(bool value)
         child_navigable->set_should_show_line_box_borders(value);
 }
 
+void Navigable::set_should_show_caret_hit_test_debug_overlay(bool value)
+{
+    m_should_show_caret_hit_test_debug_overlay = value;
+
+    if (auto document = active_document()) {
+        if (value)
+            document->set_needs_repaint(Badge<HTML::Navigable> {}, InvalidateDisplayList::Yes);
+        else
+            document->set_caret_hit_test_debug_rect({});
+    }
+
+    for (auto const& child_navigable : child_navigables())
+        child_navigable->set_should_show_caret_hit_test_debug_overlay(value);
+}
+
 bool Navigable::record_display_list_and_scroll_state(PaintConfig paint_config)
 {
     if (!has_compositor_context())
@@ -3455,6 +3483,7 @@ bool Navigable::record_display_list_and_scroll_state(PaintConfig paint_config)
         return false;
 
     adopt_pending_async_scroll_offsets();
+    document->update_paint_and_hit_testing_properties_if_needed();
 
     auto should_record_display_list = m_needs_to_record_display_list
         || !m_compositor_display_list_paint_config.has_value()
@@ -3472,6 +3501,7 @@ bool Navigable::record_display_list_and_scroll_state(PaintConfig paint_config)
         VERIFY(recorded_document_paintable);
         visual_context_tree = recorded_document_paintable->visual_context_tree();
         display_list_resources = m_display_list_resource_storage.collect_referenced_resources(*display_list);
+        display_list_resources.include(m_display_list_resource_storage.cache_referenced_resources());
         resource_transaction = m_display_list_resource_storage.create_transaction(
             m_compositor_display_list_resources,
             display_list_resources);
@@ -3479,16 +3509,22 @@ bool Navigable::record_display_list_and_scroll_state(PaintConfig paint_config)
 
     auto document_paintable = document->paintable();
     VERIFY(document_paintable);
+    auto visual_context_tree_needs_compositor_update = document_paintable->visual_context_tree_needs_compositor_update();
     document_paintable->refresh_scroll_state();
 
     Painting::ScrollStateSnapshot scroll_state_snapshot { document_paintable->scroll_state_snapshot() };
     if (should_record_display_list) {
         compositor_context().update_display_list(*display_list, visual_context_tree.release_value(), move(resource_transaction), move(scroll_state_snapshot));
+        document_paintable->did_update_visual_context_tree_in_compositor();
         m_display_list_resource_storage.retain_only(display_list_resources);
         m_compositor_display_list_resources = move(display_list_resources);
         m_needs_to_record_display_list = false;
         m_compositor_display_list_paint_config = paint_config;
     } else {
+        if (visual_context_tree_needs_compositor_update) {
+            compositor_context().update_visual_context_tree(document_paintable->visual_context_tree());
+            document_paintable->did_update_visual_context_tree_in_compositor();
+        }
         compositor_context().update_scroll_state(move(scroll_state_snapshot));
     }
     return true;
@@ -3504,7 +3540,7 @@ void Navigable::paint_next_frame()
     }
 
     auto viewport_rect = page().css_to_device_rect(this->viewport_rect()).to_type<int>();
-    PaintConfig paint_config { .paint_overlay = true, .should_show_line_box_borders = m_should_show_line_box_borders };
+    PaintConfig paint_config { .paint_overlay = true, .should_show_line_box_borders = m_should_show_line_box_borders, .should_show_caret_hit_test_debug_overlay = m_should_show_caret_hit_test_debug_overlay };
     if (is_top_level_traversable()) {
         paint_config.canvas_fill_rect = Gfx::IntRect { {}, viewport_rect.size() };
     } else {
@@ -3628,12 +3664,8 @@ GC::Ref<WebIDL::Promise> Navigable::perform_a_scroll_of_the_viewport(CSSPixelPoi
     //     from this step.
     // FIXME: Get a Promise from this.
     vv->scroll_by({ visual_dx, visual_dy });
-    if (visual_dx != 0.0 || visual_dy != 0.0) {
-        doc->set_needs_accumulated_visual_contexts_update(true);
-        doc->set_needs_repaint(Badge<HTML::Navigable> {}, InvalidateDisplayList::Yes);
-    } else {
+    if (visual_dx == 0.0 && visual_dy == 0.0)
         doc->set_needs_repaint(Badge<HTML::Navigable> {}, InvalidateDisplayList::No);
-    }
 
     // 16. Let scrollPromise be a new Promise.
     auto scroll_promise = WebIDL::create_promise(doc->realm());

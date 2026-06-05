@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <AK/AtomicRefCounted.h>
 #include <AK/Badge.h>
 #include <AK/ByteString.h>
 #include <AK/DistinctNumeric.h>
@@ -21,6 +22,8 @@
 #include <AK/UFixedBigInt.h>
 #include <AK/Variant.h>
 #include <AK/WeakPtr.h>
+#include <LibSync/ConditionVariable.h>
+#include <LibSync/Mutex.h>
 #include <LibWasm/Constants.h>
 #include <LibWasm/Export.h>
 #include <LibWasm/Forward.h>
@@ -586,6 +589,7 @@ public:
         struct Meta {
             u32 arity;
             u32 parameter_count;
+            bool tier_up_eligible;
         };
         mutable Meta meta {};
     };
@@ -868,17 +872,55 @@ private:
 
 void free_cranelift_code(void* handle);
 
+struct CraneliftTrap {
+    u32 offset { 0 };
+    u8 code { 0 };
+    u8 _padding[3] { 0, 0, 0 };
+};
+static_assert(sizeof(CraneliftTrap) == 8);
+
 struct CompiledInstructions {
     Vector<Dispatch> dispatches;
     Vector<SourcesAndDestination> src_dst_mappings;
     InstructionStorage extra_instruction_storage;
-    bool direct = false; // true if all dispatches contain handler_ptr, otherwise false and all contain instruction_opcode.
-    bool cranelift_compiled = false;
+
+    // Pointer/size_t-sized members first, then the u32, then the bools, so the trailing scalars pack
+    // into one word instead of scattering padding between them.
+
+    // Native entry point for this function (conforms to the interpreter handler ABI). Zero until
+    // the background/AOT compile has fully installed the code. Published with an atomic store-release
+    // as the LAST step of install_compiled_function() and read with an atomic load-acquire at every
+    // execution-decision site, so a function can tier up to JIT concurrently with execution without
+    // a reader ever observing a half-installed function. dispatches[0].handler_ptr always stays the
+    // C++ interpreter handler, so the interpreter path is valid regardless of compilation state.
+    FlatPtr cranelift_entry = 0;
     void* cranelift_code_handle = nullptr; // Owned; freed when the owning Module is destroyed.
     size_t cranelift_code_size = 0;
+    CraneliftTrap const* cranelift_traps = nullptr; // Owned by cranelift_code_handle.
+    size_t cranelift_trap_count = 0;
     size_t max_call_arg_count = 0;
     size_t max_call_rec_size = 0;
+
+    u32 cranelift_result_arity = 0; // result count to hand to try_cranelift_compile(); only meaningful when cranelift_eligible.
+
+    bool direct = false;                  // true if all dispatches contain handler_ptr, otherwise false and all contain instruction_opcode.
+    bool cranelift_eligible = false;      // true if this expression cleared the Cranelift type/shape checks during validation.
+    bool has_tier_up_checkpoints = false; // true if try_compile_instructions inserted synthetic_tier_up ops (Tier-Up sites).
+    bool cranelift_compiled = false;
 };
+
+// Read the native entry with acquire ordering: a non-zero result means the function is fully
+// installed and every cranelift_* field written before publication is visible to this thread.
+inline FlatPtr cranelift_entry_acquire(CompiledInstructions const& ci)
+{
+    return AK::atomic_load(const_cast<FlatPtr volatile*>(&ci.cranelift_entry), AK::MemoryOrder::memory_order_acquire);
+}
+
+// Publish the native entry with release ordering. Must be the LAST write of install.
+inline void publish_cranelift_entry(CompiledInstructions& ci, FlatPtr entry)
+{
+    AK::atomic_store(&ci.cranelift_entry, entry, AK::MemoryOrder::memory_order_release);
+}
 
 template<Enum auto... Vs>
 consteval auto as_ordered()
@@ -1467,7 +1509,38 @@ private:
     Vector<TagType> m_tags;
 };
 
-class WASM_API Module : public RefCounted<Module>
+enum class CompileToNative : u8 {
+    No,
+    Yes,
+};
+
+// Lightweight per-module compile stats accumulator. Exposed to embedders via record_module_stats() below.
+// The cranelift_* and cache_hit fields are filled in by compile_module_to_native() once native compilation actually runs (possibly on another thread).
+struct ModuleStats {
+    Array<u8, 32> wasm_hash {};
+    size_t input_size_bytes { 0 };
+    AK::Duration parse_time;
+    AK::Duration validate_time;
+    AK::Duration cranelift_time;
+    size_t cranelift_blob_size_bytes { 0 };
+    size_t function_count { 0 };
+    size_t tier_up_function_count { 0 };   // functions instrumented with tier-up checkpoints
+    size_t tier_up_checkpoint_count { 0 }; // total tier-up checkpoints inserted across the module
+    bool cache_hit { false };
+};
+
+// Caller-supplied hooks for the Cranelift on-disk cache.
+//   - `wasm_hash` is a 32-byte digest of the wasm bytes; embedded in produced blobs and verified against `existing_blob` before any install.
+//   - `existing_blob` is the prior cache hit (or empty for a miss); the native-compile pass tries to install it before falling through to cranelift.
+//     Owned, since the compile may run asynchronously long after the config was assembled.
+//   - `on_compiled` is invoked exactly once if a fresh blob was produced; never invoked on a cache hit nor when no cranelift output was captured.
+struct CompileCacheConfig {
+    Array<u8, 32> wasm_hash {};
+    ByteBuffer existing_blob;
+    AK::Function<void(ByteBuffer)> on_compiled;
+};
+
+class WASM_API Module : public AtomicRefCounted<Module>
     , public Weakable<Module> {
 public:
     enum class ValidationStatus {
@@ -1514,6 +1587,36 @@ public:
     ValidationStatus validation_status() const { return m_validation_status; }
     StringView validation_error() const LIFETIME_BOUND { return *m_validation_error; }
     void set_validation_error(ByteString error) { m_validation_error = move(error); }
+    bool has_attempted_cranelift_compilation() const { return m_cranelift_compilation_state.load(AK::MemoryOrder::memory_order_acquire) == 2; }
+    bool try_begin_cranelift_compilation() const
+    {
+        u8 not_started = 0;
+        return m_cranelift_compilation_state.compare_exchange_strong(not_started, 1, AK::MemoryOrder::memory_order_acq_rel);
+    }
+    void finish_cranelift_compilation() const
+    {
+        Sync::MutexLocker locker(m_cranelift_compilation_mutex);
+        m_cranelift_compilation_state.store(2, AK::MemoryOrder::memory_order_release);
+        m_cranelift_compilation_state_changed.broadcast();
+    }
+    void wait_for_cranelift_compilation() const
+    {
+        if (m_cranelift_compilation_state.load(AK::MemoryOrder::memory_order_acquire) != 1)
+            return;
+
+        Sync::MutexLocker locker(m_cranelift_compilation_mutex);
+        m_cranelift_compilation_state_changed.wait_while([this] {
+            return m_cranelift_compilation_state.load(AK::MemoryOrder::memory_order_acquire) == 1;
+        });
+    }
+
+    // Disk-cache config for native compilation. Parked here by the embedder before compilation is kicked off, and consumed by whichever path ends up driving compile_module_to_native() first.
+    void set_cranelift_cache_config(CompileCacheConfig config) { m_cranelift_cache_config = move(config); }
+    Optional<CompileCacheConfig> take_cranelift_cache_config() { return move(m_cranelift_cache_config); }
+
+    // Compile stats parked here by the embedder; compile_module_to_native() fills in the cranelift_* / cache_hit fields once native compilation runs, then records them.
+    void set_compile_stats(ModuleStats stats) { m_compile_stats = move(stats); }
+    Optional<ModuleStats> take_compile_stats() { return move(m_compile_stats); }
 
     static ParseResult<NonnullRefPtr<Module>> parse(Stream& stream);
 
@@ -1541,45 +1644,23 @@ private:
 
     ValidationStatus m_validation_status { ValidationStatus::Unchecked };
     Optional<ByteString> m_validation_error;
+    mutable Atomic<u8> m_cranelift_compilation_state { 0 };
+    mutable Sync::Mutex m_cranelift_compilation_mutex;
+    mutable Sync::ConditionVariable m_cranelift_compilation_state_changed { m_cranelift_compilation_mutex };
+    Optional<CompileCacheConfig> m_cranelift_cache_config;
+    Optional<ModuleStats> m_compile_stats;
 
     size_t m_minimum_call_record_allocation_size { 0 };
 };
 
 CompiledInstructions try_compile_instructions(Expression const&, Span<FunctionType const> functions);
+ErrorOr<void, ValidationError> ensure_cranelift_compiled(Module&);
+WASM_API void start_cranelift_compilation(Module&);
 bool try_cranelift_compile(CompiledInstructions& compiled, u32 result_arity = 0);
 void flush_cranelift_batch();
+void discard_cranelift_batch();
 
-// Caller-supplied hooks for the Cranelift on-disk cache.
-//   - `wasm_hash` is a 32-byte digest of the wasm bytes; embedded in produced blobs
-//     and verified against `existing_blob` before any install.
-//   - `existing_blob` is the prior cache hit (or empty for a miss); validator tries
-//     to install it before falling through to cranelift.
-//   - `on_compiled` is invoked exactly once if a fresh blob was produced; never
-//     invoked on a cache hit nor when no cranelift output was captured.
-//   - The `out_*` fields, if non-null, receive measurements taken during
-//     validate(CodeSection). Used by the LibWeb side to populate ModuleStats.
-struct CompileCacheConfig {
-    Array<u8, 32> wasm_hash {};
-    ReadonlyBytes existing_blob;
-    AK::Function<void(ByteBuffer)> on_compiled;
-
-    AK::Duration* out_cranelift_time { nullptr };
-    size_t* out_function_count { nullptr };
-    size_t* out_cranelift_blob_size_bytes { nullptr };
-    bool* out_cache_hit { nullptr };
-};
-
-// Lightweight per-module compile stats accumulator. Exposed to embedders via record_module_stats() below.
-struct ModuleStats {
-    Array<u8, 32> wasm_hash {};
-    size_t input_size_bytes { 0 };
-    AK::Duration parse_time;
-    AK::Duration validate_time;
-    AK::Duration cranelift_time;
-    size_t cranelift_blob_size_bytes { 0 };
-    size_t function_count { 0 };
-    bool cache_hit { false };
-};
+void compile_module_to_native(Module&);
 
 WASM_API void record_module_stats(ModuleStats);
 WASM_API void dump_module_stats();

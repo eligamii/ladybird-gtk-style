@@ -10,6 +10,7 @@
 
 #include <AK/HashTable.h>
 #include <AK/JsonObjectSerializer.h>
+#include <AK/NeverDestroyed.h>
 #include <AK/StringBuilder.h>
 #include <LibGC/DeferGC.h>
 #include <LibGC/WeakHashMap.h>
@@ -82,8 +83,8 @@ namespace Web::DOM {
 static UniqueNodeID s_next_unique_id;
 static GC::WeakHashMap<UniqueNodeID, Node>& node_directory()
 {
-    static GC::WeakHashMap<UniqueNodeID, Node> directory;
-    return directory;
+    static NeverDestroyed<GC::WeakHashMap<UniqueNodeID, Node>> directory;
+    return *directory;
 }
 
 static UniqueNodeID allocate_unique_id(Node& node)
@@ -1809,8 +1810,13 @@ void Node::removed_from(IsSubtreeRoot, Node*, Node&)
     m_is_connected = false;
     m_in_editable_subtree = false;
     m_inside_blocking_wheel_event_handler = false;
+    if (m_layout_node)
+        m_layout_node->clear_paintables();
     m_layout_node = nullptr;
     m_paintable = nullptr;
+
+    if (auto* element = as_if<Element>(*this))
+        element->clear_synthetic_pseudo_element_layout_nodes(Badge<Node> {});
 }
 
 // https://dom.spec.whatwg.org/#concept-node-move-ext

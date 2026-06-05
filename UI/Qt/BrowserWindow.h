@@ -11,6 +11,7 @@
 #include <LibWeb/HTML/ActivateTab.h>
 #include <LibWeb/HTML/AudioPlayState.h>
 #include <LibWebView/Forward.h>
+#include <LibWebView/Settings.h>
 #include <UI/Qt/Tab.h>
 #include <UI/Qt/TabBar.h>
 
@@ -29,6 +30,7 @@ namespace Ladybird {
 class Tab;
 class WebContentView;
 class BrowserWindow;
+class DevToolsBanner;
 
 class ExitFullscreenButton : public QPushButton {
     Q_OBJECT
@@ -80,7 +82,9 @@ private:
     bool m_debounce { false };
 };
 
-class BrowserWindow : public QMainWindow {
+class BrowserWindow
+    : public QMainWindow
+    , public WebView::SettingsObserver {
     Q_OBJECT
 
 public:
@@ -102,12 +106,14 @@ public:
     FullscreenMode& fullscreen_mode();
 
     QMenu& hamburger_menu() const { return *m_hamburger_menu; }
+    static bool uses_client_side_decorations();
 
     QAction& new_window_action() const { return *m_new_window_action; }
     QAction& find_action() const { return *m_find_in_page_action; }
 
+    void update_tabs_display();
+
     void rebuild_bookmarks_menu();
-    void update_bookmarks_bar_display(bool show_bookmarks_bar);
     void update_reopen_recently_closed_action();
     void detach_tab_to_new_window(int index, QPoint global_position);
     void move_tab_to_window(int index, BrowserWindow& target_window, int target_index);
@@ -150,6 +156,10 @@ private:
     virtual void wheelEvent(QWheelEvent*) override;
     virtual void closeEvent(QCloseEvent*) override;
 
+    virtual void show_menu_bar_changed() override;
+    virtual void show_bookmarks_bar_changed() override;
+    virtual void config_variable_changed(WebView::ConfigVariableID) override;
+
     Tab& create_new_tab(Web::HTML::ActivateTab, Tab& parent, Optional<u64> page_index);
     void initialize_tab(Tab*);
     void uninitialize_tab(Tab*);
@@ -159,6 +169,7 @@ private:
     Optional<Qt::CursorShape> resize_cursor_for_edges(Qt::Edges) const;
     void update_resize_cursor(QPoint const&);
     void clear_resize_cursor();
+    void update_window_corners();
 
     template<typename Callback>
     void for_each_tab(Callback&& callback)
@@ -169,10 +180,11 @@ private:
 
     void initialize_tab_buttons(Tab*);
     void create_menu_bar_window_controls();
-    void update_tab_close_button_icons();
+    void update_tab_button_icons();
     void update_menu_bar_style();
-    void update_menu_bar_visibility(bool);
+    void update_menu_bar_visibility();
     void update_menu_bar_window_control_icons();
+    void update_window_decoration_state();
     void toggle_window_maximized();
     bool start_window_move();
     bool connect_window_screen_changed_signal();
@@ -193,6 +205,7 @@ private:
 
     TabWidget* m_tabs_container { nullptr };
     Tab* m_current_tab { nullptr };
+    DevToolsBanner* m_devtools_banner { nullptr };
 
     QMenu* m_hamburger_menu { nullptr };
     QMenu* m_bookmarks_menu { nullptr };
