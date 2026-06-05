@@ -81,7 +81,7 @@ void BrowserWindow::register_actions()
     add_action("focus-location", [](BrowserWindow& self) { ladybird_location_entry_focus_and_select_all(self.m_location_entry); });
 
     add_action("open-overview", [](BrowserWindow& self) {
-        adw_tab_overview_set_open(self.m_tab_overview, true);
+        adw_tab_overview_set_open(self.m_tab_overview, !adw_tab_overview_get_open(self.m_tab_overview));
     });
 
     add_action("go-back", [](BrowserWindow& self) {
