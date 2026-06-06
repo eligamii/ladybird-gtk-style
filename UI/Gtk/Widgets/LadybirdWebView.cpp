@@ -10,6 +10,25 @@
 #include <adwaita.h>
 #include <gdk/gdk.h>
 
+// Scroll constants and types
+
+static constexpr double ANIMATION_DURATION_IN_MSEC = 2000;
+// To mimic the exact scroll speed of GtkScrolledWindow
+static constexpr double SCROLL_SPEED_MULTIPLIER = 2.3;
+
+struct KineticScrollState {
+    double x_velocity;
+    double y_velocity;
+    double last_tick_fraction;
+    Ladybird::GObjectPtr<AdwAnimation> animation;
+
+    void end_kinetic_scroll() const
+    {
+        adw_animation_pause(animation.ptr());
+    }
+};
+
+
 #define LADYBIRD_WEB_VIEW(obj) (reinterpret_cast<LadybirdWebView*>(obj))
 #define LADYBIRD_TYPE_WEB_VIEW (ladybird_web_view_get_type())
 
@@ -18,6 +37,8 @@ struct LadybirdWebView {
     Ladybird::WebContentView* impl { nullptr };
     double last_mouse_x { 0 };
     double last_mouse_y { 0 };
+
+    Optional<KineticScrollState> kinetic_scroll_state;
 };
 
 struct LadybirdWebViewClass {
@@ -182,6 +203,81 @@ static void on_mouse_leave(GtkEventControllerMotion*, gpointer user_data)
     self->impl->enqueue_native_event(Web::MouseEvent::Type::MouseLeave, 0, 0, 0, static_cast<GdkModifierType>(0), 0);
 }
 
+static void kinetic_scroll_callback(double time, gpointer user_data) {
+    static constexpr double friction = 4;
+
+    auto* self = LADYBIRD_WEB_VIEW(user_data);
+    if (!self->kinetic_scroll_state.has_value())
+        return;
+
+    auto& kinetic_scroll_state = self->kinetic_scroll_state.value();
+
+    double dt = time - kinetic_scroll_state.last_tick_fraction;
+    kinetic_scroll_state.last_tick_fraction = time;
+
+    double dx = kinetic_scroll_state.x_velocity * dt;
+    double dy = kinetic_scroll_state.y_velocity * dt;
+
+    kinetic_scroll_state.x_velocity *= exp(-friction * dt);
+    kinetic_scroll_state.y_velocity *= exp(-friction * dt);
+
+    auto device_pixel_ratio = self->impl->device_pixel_ratio();
+
+    double wheel_delta_x = dx * device_pixel_ratio;
+    double wheel_delta_y = dy * device_pixel_ratio;
+
+    auto position = Web::DevicePixelPoint { static_cast<int>(self->last_mouse_x * device_pixel_ratio), static_cast<int>(self->last_mouse_y * device_pixel_ratio) };
+
+    Web::MouseEvent event {
+        .type = Web::MouseEvent::Type::MouseWheel,
+        .position = position,
+        // FIXME: This should be absolute screen coordinates, but Wayland does not expose window positions to applications.
+        .screen_position = position,
+        .button = Web::UIEvents::MouseButton::None,
+        .buttons = Web::UIEvents::MouseButton::None,
+        .modifiers = Web::UIEvents::Mod_None,
+        .wheel_delta_x = wheel_delta_x,
+        .wheel_delta_y = wheel_delta_y,
+        .click_count = 0,
+        .browser_data = {},
+    };
+    self->impl->enqueue_input_event(move(event));
+}
+
+static void on_decelerate(GtkEventControllerScroll*, gdouble vel_x, gdouble vel_y, gpointer user_data)
+{
+    if (vel_x == 0 && vel_y == 0)
+        return;
+
+    auto* self = LADYBIRD_WEB_VIEW(user_data);
+
+    AdwAnimationTarget* callback_animation = adw_callback_animation_target_new(
+        kinetic_scroll_callback,
+        user_data,
+        nullptr);
+
+    AdwAnimation* animation = adw_timed_animation_new(
+        GTK_WIDGET(self),
+        0,
+        ANIMATION_DURATION_IN_MSEC / 1000,
+        ANIMATION_DURATION_IN_MSEC,
+        callback_animation);
+
+    adw_timed_animation_set_easing(ADW_TIMED_ANIMATION(animation), ADW_LINEAR);
+
+    if (self->kinetic_scroll_state.has_value())
+        self->kinetic_scroll_state->end_kinetic_scroll();
+
+    adw_animation_play(animation);
+
+    self->kinetic_scroll_state = KineticScrollState {
+        .x_velocity = vel_x * SCROLL_SPEED_MULTIPLIER,
+        .y_velocity = vel_y * SCROLL_SPEED_MULTIPLIER,
+        .last_tick_fraction = 0,
+        .animation = Ladybird::GObjectPtr { animation },
+    };
+}
+
 static gboolean on_scroll(GtkEventControllerScroll* controller, gdouble dx, gdouble dy, gpointer user_data)
 {
     auto* self = LADYBIRD_WEB_VIEW(user_data);
@@ -190,6 +286,9 @@ static gboolean on_scroll(GtkEventControllerScroll* controller, gdouble dx, gdou
 
     if (self->impl->is_node_picker_active())
         return GDK_EVENT_STOP;
+
+    if (self->kinetic_scroll_state.has_value())
+        self->kinetic_scroll_state->end_kinetic_scroll();
 
     auto state = gtk_event_controller_get_current_event_state(GTK_EVENT_CONTROLLER(controller));
 
@@ -211,8 +310,8 @@ static gboolean on_scroll(GtkEventControllerScroll* controller, gdouble dx, gdou
     auto unit = gdk_scroll_event_get_unit(gdk_event);
 
     if (unit == GDK_SCROLL_UNIT_SURFACE) {
-        wheel_delta_x = dx * device_pixel_ratio;
-        wheel_delta_y = dy * device_pixel_ratio;
+        wheel_delta_x = dx * device_pixel_ratio * SCROLL_SPEED_MULTIPLIER;
+        wheel_delta_y = dy * device_pixel_ratio * SCROLL_SPEED_MULTIPLIER;
     } else {
         static constexpr double scroll_lines = 3.0;
         static constexpr double scroll_step_size = 40.0;
@@ -297,8 +396,9 @@ static void ladybird_web_view_init(LadybirdWebView* self)
     g_signal_connect(motion_controller, "leave", G_CALLBACK(on_mouse_leave), self);
     gtk_widget_add_controller(GTK_WIDGET(self), motion_controller);
 
-    auto* scroll_controller = gtk_event_controller_scroll_new(GTK_EVENT_CONTROLLER_SCROLL_BOTH_AXES);
+    auto* scroll_controller = gtk_event_controller_scroll_new(static_cast<GtkEventControllerScrollFlags>(GTK_EVENT_CONTROLLER_SCROLL_BOTH_AXES | GTK_EVENT_CONTROLLER_SCROLL_KINETIC));
     g_signal_connect(scroll_controller, "scroll", G_CALLBACK(on_scroll), self);
+    g_signal_connect(scroll_controller, "decelerate", G_CALLBACK(on_decelerate), self);
     gtk_widget_add_controller(GTK_WIDGET(self), scroll_controller);
 }
 
