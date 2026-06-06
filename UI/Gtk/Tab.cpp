@@ -116,6 +116,8 @@ void Tab::setup_callbacks()
     };
 
     m_view->on_load_start = [this](auto const&, bool) {
+        adw_tab_page_set_indicator_icon(m_tab_page, nullptr);
+
         m_is_loading = true;
         m_favicon.clear();
         if (m_tab_page)
@@ -257,13 +259,8 @@ void Tab::setup_callbacks()
             m_window->update_location_favicon(m_favicon.ptr());
     };
 
-    m_view->on_audio_play_state_changed = [this](auto play_state) {
-        if (m_tab_page) {
-            adw_tab_page_set_indicator_icon(m_tab_page,
-                play_state == Web::HTML::AudioPlayState::Playing
-                    ? g_themed_icon_new("audio-volume-high-symbolic")
-                    : nullptr);
-        }
+    m_view->on_audio_play_state_changed = [this](auto) {
+        update_indicator_icon();
     };
 
     // FIXME: Support non-modal JS dialogs (on_request_set_prompt_text,
@@ -292,6 +289,21 @@ void Tab::update_tab_title()
     auto title = tab_title();
     adw_tab_page_set_title(m_tab_page, title.characters());
     adw_tab_page_set_tooltip(m_tab_page, title.characters());
+}
+
+void Tab::update_indicator_icon()
+{
+    if (!m_tab_page)
+        return;
+
+    char const* icon_name = nullptr;
+    if (m_view->audio_play_state() == Web::HTML::AudioPlayState::Playing)
+        icon_name = m_view->page_mute_state() == Web::HTML::MuteState::Unmuted
+            ? "audio-volume-high-symbolic"
+            : "audio-volume-muted-symbolic";
+
+    adw_tab_page_set_indicator_icon(m_tab_page,
+            icon_name ? g_themed_icon_new(icon_name) : nullptr);
 }
 
 void Tab::config_variable_changed(WebView::ConfigVariableID variable)

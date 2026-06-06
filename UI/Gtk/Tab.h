@@ -44,6 +44,8 @@ public:
 
     BrowserWindow* m_window { nullptr };
 
+    void update_indicator_icon();
+
 private:
     Tab(BrowserWindow* window, RefPtr<WebView::WebContentClient> parent_client, size_t page_index);
     void setup_callbacks();

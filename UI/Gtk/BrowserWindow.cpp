@@ -98,7 +98,6 @@ void BrowserWindow::register_actions()
         adw_tab_view_close_other_pages(self.m_tab_view, self.right_clicked_tab().value()->tab_page());
     });
 
-
     add_action("new-tab", [](BrowserWindow& self) { self.create_new_tab(Web::HTML::ActivateTab::Yes); });
     add_action("new-window", [](BrowserWindow&) { Application::the().new_window({}); });
     add_action("close-tab", [](BrowserWindow& self) { self.close_current_tab(); });
@@ -206,6 +205,13 @@ void BrowserWindow::setup_ui(AdwApplication* app)
         this);
 
     register_actions();
+
+    g_signal_connect_swapped(m_tab_view, "indicator-activated", G_CALLBACK(+[](BrowserWindow* self, AdwTabPage* page) {
+        auto& tab = self->tab_for_tab_page(page).value();
+        tab->view().toggle_page_mute_state();
+        tab->update_indicator_icon();
+    }),
+        this);
 
     g_signal_connect_swapped(m_tab_view, "setup-menu", G_CALLBACK(+[](BrowserWindow* self, AdwTabPage* page) {
         if (page) {
@@ -369,6 +375,7 @@ Tab& BrowserWindow::create_new_tab(URL::URL const& url, Web::HTML::ActivateTab a
     pos = pos < 0 ? adw_tab_view_get_n_pages(m_tab_view) : pos;
     auto* page = adw_tab_view_insert(m_tab_view, tab_ref.widget(), pos);
     adw_tab_page_set_title(page, "New Tab");
+    adw_tab_page_set_indicator_activatable(page, true);
     tab_ref.set_tab_page(page);
     m_tabs.append(move(tab));
 
@@ -442,7 +449,7 @@ Tab* BrowserWindow::current_tab() const
     }
     return nullptr;
 }
-Optional<NonnullOwnPtr<Tab>&>  BrowserWindow::tab_for_tab_page(AdwTabPage* page)
+Optional<NonnullOwnPtr<Tab>&> BrowserWindow::tab_for_tab_page(AdwTabPage* page)
 {
     auto* child = adw_tab_page_get_child(page);
     auto maybe_tab = m_tabs.first_matching([child](Tab* tab) {
