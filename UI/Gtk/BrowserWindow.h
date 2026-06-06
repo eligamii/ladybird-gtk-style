@@ -28,11 +28,13 @@ public:
     GtkWindow* gtk_window() const { return GTK_WINDOW(m_window); }
 
     Tab& create_new_tab(Web::HTML::ActivateTab activate_tab);
-    Tab& create_new_tab(URL::URL const& url, Web::HTML::ActivateTab activate_tab);
+    Tab& create_new_tab(URL::URL const& url, Web::HTML::ActivateTab activate_tab, int pos = -1);
     Tab& create_child_tab(Web::HTML::ActivateTab activate_tab, Tab& parent, u64 page_index);
     void close_tab(Tab& tab);
     void close_current_tab();
     Tab* current_tab() const;
+    Optional<NonnullOwnPtr<Tab>&> tab_for_tab_page(AdwTabPage* page);
+    Optional<NonnullOwnPtr<Tab>&> right_clicked_tab();
     WebContentView* view() const;
     void present();
     int tab_count() const;
@@ -78,6 +80,9 @@ private:
     GtkSearchEntry* m_find_entry { nullptr };
     GtkLabel* m_find_result_label { nullptr };
     AdwToastOverlay* m_toast_overlay { nullptr };
+
+    bool is_tab_menu_opened { false };
+    AdwTabPage* m_right_clicked_tab { nullptr };
 
     struct ActionBinding {
         WebView::Action* action { nullptr };

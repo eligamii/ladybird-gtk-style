@@ -75,6 +75,30 @@ void BrowserWindow::register_actions()
         g_action_map_add_action(G_ACTION_MAP(m_window), G_ACTION(action.ptr()));
     };
 
+    add_action("right-clicked-tab-duplicate", [](BrowserWindow& self) {
+        auto& tab = self.right_clicked_tab().value();
+
+        int pos = adw_tab_view_get_page_position(self.m_tab_view, tab->tab_page());
+        self.create_new_tab(tab->view().url(), Web::HTML::ActivateTab::Yes, pos + 1);
+    });
+
+    add_action("right-clicked-tab-close", [](BrowserWindow& self) {
+        self.close_tab(*self.right_clicked_tab().value());
+    });
+
+    add_action("right-clicked-tab-close-previous", [](BrowserWindow& self) {
+        adw_tab_view_close_pages_before(self.m_tab_view, self.right_clicked_tab().value()->tab_page());
+    });
+
+    add_action("right-clicked-tab-close-next", [](BrowserWindow& self) {
+        adw_tab_view_close_pages_after(self.m_tab_view, self.right_clicked_tab().value()->tab_page());
+    });
+
+    add_action("right-clicked-tab-close-other", [](BrowserWindow& self) {
+        adw_tab_view_close_other_pages(self.m_tab_view, self.right_clicked_tab().value()->tab_page());
+    });
+
+
     add_action("new-tab", [](BrowserWindow& self) { self.create_new_tab(Web::HTML::ActivateTab::Yes); });
     add_action("new-window", [](BrowserWindow&) { Application::the().new_window({}); });
     add_action("close-tab", [](BrowserWindow& self) { self.close_current_tab(); });
@@ -183,6 +207,13 @@ void BrowserWindow::setup_ui(AdwApplication* app)
 
     register_actions();
 
+    g_signal_connect_swapped(m_tab_view, "setup-menu", G_CALLBACK(+[](BrowserWindow* self, AdwTabPage* page) {
+        if (page) {
+            self->m_right_clicked_tab = page;
+        }
+    }),
+        this);
+
     g_signal_connect_swapped(m_tab_view, "close-page", G_CALLBACK(+[](BrowserWindow* self, AdwTabPage* page) -> gboolean {
         self->on_tab_close_request(page);
         return GDK_EVENT_STOP;
@@ -202,14 +233,11 @@ void BrowserWindow::setup_ui(AdwApplication* app)
             });
 
             self->s_detached_tab = self->m_tabs.take(it.index());
-            warnln("{}", self->s_detached_tab);
         }
     }),
         this);
 
     g_signal_connect_swapped(m_tab_view, "page-attached", G_CALLBACK(+[](BrowserWindow* self, AdwTabPage* page, gint, gpointer) {
-        warnln("{}", self->s_detached_tab.ptr());
-
         if (adw_tab_view_get_is_transferring_page(self->m_tab_view)) {
             self->s_detached_tab->set_tab_page(page);
             self->s_detached_tab->m_window = self;
@@ -333,12 +361,13 @@ Tab& BrowserWindow::create_new_tab(Web::HTML::ActivateTab activate_tab)
     return tab;
 }
 
-Tab& BrowserWindow::create_new_tab(URL::URL const& url, Web::HTML::ActivateTab activate_tab)
+Tab& BrowserWindow::create_new_tab(URL::URL const& url, Web::HTML::ActivateTab activate_tab, int pos)
 {
     auto tab = make<Tab>(this, url);
     auto& tab_ref = *tab;
 
-    auto* page = adw_tab_view_append(m_tab_view, tab_ref.widget());
+    pos = pos < 0 ? adw_tab_view_get_n_pages(m_tab_view) : pos;
+    auto* page = adw_tab_view_insert(m_tab_view, tab_ref.widget(), pos);
     adw_tab_page_set_title(page, "New Tab");
     tab_ref.set_tab_page(page);
     m_tabs.append(move(tab));
@@ -412,6 +441,24 @@ Tab* BrowserWindow::current_tab() const
             return tab.ptr();
     }
     return nullptr;
+}
+Optional<NonnullOwnPtr<Tab>&>  BrowserWindow::tab_for_tab_page(AdwTabPage* page)
+{
+    auto* child = adw_tab_page_get_child(page);
+    auto maybe_tab = m_tabs.first_matching([child](Tab* tab) {
+        return tab->widget() == child;
+    });
+
+    return maybe_tab;
+}
+
+Optional<NonnullOwnPtr<Tab>&> BrowserWindow::right_clicked_tab()
+{
+    // NB: Setting tab_for_tab_page's argument to nullptr is safe (will fail at release_value())
+    auto tab = tab_for_tab_page(m_right_clicked_tab);
+    m_right_clicked_tab = nullptr;
+
+    return tab;
 }
 
 WebContentView* BrowserWindow::view() const

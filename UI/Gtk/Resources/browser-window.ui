@@ -149,6 +149,7 @@
                 <child>
                   <object class="AdwTabView" id="tab_view">
                     <property name="vexpand">true</property>
+                    <property name="menu-model">tab_context_menu</property>
                   </object>
                 </child>
               </object>
@@ -164,6 +165,34 @@
       </object>
     </child>
   </template>
+
+  <!-- Tab context menu -->
+  <menu id="tab_context_menu">
+    <section>
+      <item>
+        <attribute name="label">Duplicate</attribute>
+        <attribute name="action">win.right-clicked-tab-duplicate</attribute>
+      </item>
+    </section>
+    <section>
+      <item>
+        <attribute name="label">Close previous tabs</attribute>
+        <attribute name="action">win.right-clicked-tab-close-previous</attribute>
+      </item>
+      <item>
+        <attribute name="label">Close next tabs</attribute>
+        <attribute name="action">win.right-clicked-tab-close-next</attribute>
+      </item>
+      <item>
+        <attribute name="label">Close other tabs</attribute>
+        <attribute name="action">win.right-clicked-tab-close-other</attribute>
+      </item>
+      <item>
+        <attribute name="label">Close</attribute>
+        <attribute name="action">win.right-clicked-tab-close</attribute>
+      </item>
+    </section>
+  </menu>
 
   <!-- Hamburger menu model -->
   <menu id="hamburger_menu">
