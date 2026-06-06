@@ -47,8 +47,13 @@ public:
     void show_find_bar();
     void hide_find_bar();
 
+    void show_status_text(char const* text);
+    void hide_status_text();
+
     void on_devtools_enabled();
     void on_devtools_disabled();
+
+    void on_pointer_motion(double x, double y);
 
     void show_toast(AdwToast* toast);
 
@@ -75,6 +80,9 @@ private:
     GtkSearchEntry* m_find_entry { nullptr };
     GtkLabel* m_find_result_label { nullptr };
     AdwToastOverlay* m_toast_overlay { nullptr };
+    GtkLabel* m_status_text { nullptr };
+
+    guint m_status_text_hide_timeout_source_id { 0 };
 
     struct ActionBinding {
         WebView::Action* action { nullptr };

@@ -136,8 +136,24 @@
         <child>
           <object class="AdwToastOverlay" id="toast_overlay">
             <child>
-              <object class="AdwTabView" id="tab_view">
-                <property name="vexpand">true</property>
+              <object class="GtkOverlay">
+                <child>
+                  <object class="AdwTabView" id="tab_view">
+                    <property name="vexpand">true</property>
+                  </object>
+                </child>
+                <child type="overlay">
+                  <object class="GtkLabel" id="status_text">
+                    <style>
+                      <class name="ladybird-status-text"/>
+                    </style>
+                    <property name="halign">1</property>
+                    <property name="valign">2</property>
+                    <property name="ellipsize">2</property>
+                    <property name="opacity">0</property>
+                    <property name="can-target">false</property>
+                  </object>
+                </child>
               </object>
             </child>
           </object>

@@ -29,6 +29,7 @@ struct LadybirdBrowserWindow {
     AdwBanner* devtools_banner { nullptr };
     GMenu* hamburger_menu { nullptr };
     LadybirdLocationEntry* location_entry { nullptr };
+    GtkLabel* status_text { nullptr };
 };
 
 struct LadybirdBrowserWindowClass {
@@ -64,6 +65,7 @@ static void ladybird_browser_window_class_init(LadybirdBrowserWindowClass* klass
     gtk_widget_class_bind_template_child(widget_class, LadybirdBrowserWindow, devtools_banner);
     gtk_widget_class_bind_template_child(widget_class, LadybirdBrowserWindow, hamburger_menu);
     gtk_widget_class_bind_template_child(widget_class, LadybirdBrowserWindow, location_entry);
+    gtk_widget_class_bind_template_child(widget_class, LadybirdBrowserWindow, status_text);
 }
 
 static void ladybird_browser_window_init(LadybirdBrowserWindow* self)
@@ -92,5 +94,6 @@ GMenu* browser_window_hamburger_menu(LadybirdBrowserWindow* window) { return win
 AdwToastOverlay* browser_window_toast_overlay(LadybirdBrowserWindow* window) { return window->toast_overlay; }
 GtkMenuButton* browser_window_menu_button(LadybirdBrowserWindow* window) { return window->menu_button; }
 LadybirdLocationEntry* browser_window_location_entry(LadybirdBrowserWindow* window) { return window->location_entry; }
+GtkLabel* browser_window_status_text(LadybirdBrowserWindow* window) { return window->status_text; }
 
 }
