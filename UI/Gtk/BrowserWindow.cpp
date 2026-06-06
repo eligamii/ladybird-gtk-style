@@ -146,6 +146,7 @@ void BrowserWindow::setup_ui(AdwApplication* app)
     m_find_result_label = LadybirdWidgets::browser_window_find_result_label(browser_window_widget);
     m_toast_overlay = LadybirdWidgets::browser_window_toast_overlay(browser_window_widget);
     m_location_entry = LadybirdWidgets::browser_window_location_entry(browser_window_widget);
+    m_status_text = LadybirdWidgets::browser_window_status_text(browser_window_widget);
 
     // Connect find entry signals
     g_signal_connect_swapped(m_find_entry, "search-changed", G_CALLBACK(+[](BrowserWindow* self, GtkSearchEntry* entry) {
@@ -235,6 +236,28 @@ void BrowserWindow::setup_ui(AdwApplication* app)
 
     if (WebView::Application::browser_options().devtools_port.has_value())
         on_devtools_enabled();
+
+
+    // Setup status text
+    GtkEventController* motion_controller = gtk_event_controller_motion_new();
+
+    g_signal_connect_swapped(m_tab_view, "notify::selected-page", G_CALLBACK(+[](BrowserWindow* self, GParamSpec*) {
+        self->on_tab_switched();
+    }),
+        this);
+
+    g_signal_connect_swapped(motion_controller, "motion", G_CALLBACK(+[](void*, GtkEventControllerMotion* controller, gdouble, gdouble, gpointer) {
+        auto* status_text = gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(controller));
+
+        GtkAlign align = gtk_widget_get_halign(status_text);
+        gtk_widget_set_halign(status_text, align == GTK_ALIGN_START ? GTK_ALIGN_END : GTK_ALIGN_START);
+        // Otherwise set_halign won't do anything
+        gtk_widget_queue_resize(status_text);
+
+    }),
+        nullptr);
+
+    gtk_widget_add_controller(GTK_WIDGET(m_status_text), motion_controller);
 }
 
 void BrowserWindow::setup_keyboard_shortcuts()
@@ -512,6 +535,35 @@ void BrowserWindow::show_toast(AdwToast* toast)
 {
     if (m_toast_overlay)
         adw_toast_overlay_add_toast(m_toast_overlay, toast);
+}
+
+void BrowserWindow::show_status_text(char const* text, int width)
+{
+    if (m_status_text_hide_timeout_source_id) {
+        if (g_main_context_find_source_by_id(g_main_context_default(), m_status_text_hide_timeout_source_id))
+            g_source_remove(m_status_text_hide_timeout_source_id);
+    }
+
+    auto* pango = gtk_widget_get_pango_context(GTK_WIDGET(m_status_text));
+    auto* metrics = pango_context_get_metrics(pango, pango_context_get_font_description(pango), pango_context_get_language(pango));
+    int width_chars = width / (pango_font_metrics_get_approximate_digit_width(metrics) / PANGO_SCALE);
+    pango_font_metrics_unref(metrics);
+
+    gtk_label_set_max_width_chars(m_status_text, width_chars);
+
+    gtk_label_set_label(m_status_text, text);
+    gtk_widget_set_visible(GTK_WIDGET(m_status_text), true);
+}
+
+void BrowserWindow::hide_status_text()
+{
+    m_status_text_hide_timeout_source_id = g_timeout_add_once(
+        200,
+        [](void* status_text) {
+            gtk_widget_set_visible(GTK_WIDGET(status_text), false);
+            gtk_widget_set_halign(GTK_WIDGET(status_text), GTK_ALIGN_START);
+        },
+        m_status_text);
 }
 
 }
