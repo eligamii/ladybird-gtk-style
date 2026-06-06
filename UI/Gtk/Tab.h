@@ -27,8 +27,8 @@ class WebContentView;
 
 class Tab : public WebView::SettingsObserver {
 public:
-    Tab(BrowserWindow& window, URL::URL url = {});
-    Tab(BrowserWindow& window, WebView::WebContentClient& parent_client, u64 page_index);
+    Tab(BrowserWindow* window, URL::URL url = { });
+    Tab(BrowserWindow* window, WebView::WebContentClient& parent_client, u64 page_index);
     virtual ~Tab() override;
 
     GtkWidget* widget() const { return GTK_WIDGET(m_web_view); }
@@ -42,15 +42,18 @@ public:
     AdwTabPage* tab_page() const { return m_tab_page; }
     void set_tab_page(AdwTabPage*);
 
+    BrowserWindow* m_window { nullptr };
+
+    void update_indicator_icon();
+
 private:
-    Tab(BrowserWindow& window, RefPtr<WebView::WebContentClient> parent_client, size_t page_index);
+    Tab(BrowserWindow* window, RefPtr<WebView::WebContentClient> parent_client, size_t page_index);
     void setup_callbacks();
     void update_tab_title();
     ByteString tab_title() const;
     virtual void config_variable_changed(WebView::ConfigVariableID) override;
     void show_select_dropdown(Gfx::IntPoint content_position, i32 minimum_width, Vector<Web::HTML::SelectItem> items);
 
-    BrowserWindow& m_window;
     OwnPtr<WebContentView> m_view;
 
     LadybirdWebView* m_web_view { nullptr };

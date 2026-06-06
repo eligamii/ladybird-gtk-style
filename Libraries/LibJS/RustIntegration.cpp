@@ -11,6 +11,7 @@
 #include <AK/Utf16String.h>
 #include <AK/Utf16View.h>
 #include <AK/kmalloc.h>
+#include <LibCore/EventLoop.h>
 #include <LibGC/DeferGC.h>
 #include <LibJS/Bytecode/ClassBlueprint.h>
 #include <LibJS/Bytecode/Debug.h>
@@ -40,15 +41,14 @@ namespace JS::RustIntegration {
 
 // --- Shared helpers ---
 
-// Bytecode cache materialization rebuilds executables from disk, which is untrusted input. Materialization paths flip
-// this flag for the duration of their work so that the in-process bytecode validator runs even in release builds; the
-// normal Rust pipeline path leaves it off and keeps the existing debug/sanitizer-only behavior.
-static thread_local bool s_validate_materialized_bytecode_cache_executables = false;
+// Bytecode cache blobs are validated before rebuilding Executables. Materialization paths flip this flag for the
+// duration of their work so rust_create_executable() does not run the same validator again.
+static thread_local bool s_skip_bytecode_validation_for_prevalidated_cache = false;
 
 static Utf16View utf16_view_from_bytes(uint16_t const* data, size_t len)
 {
     if (len == 0)
-        return {};
+        return { };
     return Utf16View { reinterpret_cast<char16_t const*>(data), len };
 }
 
@@ -60,14 +60,14 @@ static Utf16FlyString utf16_fly_from(uint16_t const* data, size_t len)
 static Utf16FlyString utf16_fly_from_raw(uint16_t const* data, size_t len)
 {
     if (len == 0)
-        return {};
+        return { };
     return Utf16FlyString::from_utf16(utf16_view_from_bytes(data, len));
 }
 
 static Utf16String utf16_from_raw(uint16_t const* data, size_t len)
 {
     if (len == 0)
-        return {};
+        return { };
     return Utf16String::from_utf16(utf16_view_from_bytes(data, len));
 }
 
@@ -251,7 +251,7 @@ static Optional<ModuleRequest> module_request_from_ffi(uint16_t const* specifier
     FFIUtf16Slice const* attribute_keys, FFIUtf16Slice const* attribute_values, size_t attribute_count)
 {
     if (specifier == nullptr || specifier_len == 0)
-        return {};
+        return { };
     auto attributes = attributes_from_ffi(attribute_keys, attribute_values, attribute_count);
     if (attributes.is_empty())
         return ModuleRequest { utf16_fly_from_raw(specifier, specifier_len) };
@@ -383,11 +383,6 @@ static void collect_builtin_function(void* ctx, void* sfd_ptr, uint16_t const*, 
 
 // --- Compile functions ---
 
-bool rust_pipeline_available()
-{
-    return true;
-}
-
 ParsedProgram* parse_program(u16 const* utf16_data, size_t length_in_code_units, ProgramType type, size_t line_number_offset)
 {
     return rust_parse_program(utf16_data, length_in_code_units, static_cast<u8>(type), line_number_offset, g_dump_ast, g_dump_ast_use_color);
@@ -422,32 +417,51 @@ ByteBuffer serialize_compiled_program_for_bytecode_cache(CompiledProgram const& 
 {
     auto blob = rust_serialize_compiled_program_for_bytecode_cache(&compiled, static_cast<u8>(type), source_hash.data(), source_hash.size());
     if (!blob.data || blob.length == 0)
-        return {};
+        return { };
 
     auto bytes = ByteBuffer::copy({ blob.data, blob.length }).release_value_but_fixme_should_propagate_errors();
     rust_free_bytecode_cache_blob(blob.data, blob.length);
     return bytes;
 }
 
+struct BytecodeCacheBlobOwner {
+    Core::ImmutableBytes bytes;
+    Core::EventLoop* event_loop { nullptr };
+};
+
 static void free_bytecode_cache_blob_owner(void* owner)
 {
-    delete static_cast<Core::ImmutableBytes*>(owner);
+    auto owner_ptr = adopt_own_if_nonnull(static_cast<BytecodeCacheBlobOwner*>(owner));
+    if (!owner_ptr)
+        return;
+
+    if (owner_ptr->event_loop) {
+        owner_ptr->event_loop->deferred_invoke([owner = move(owner_ptr)] { (void)owner; });
+        return;
+    }
 }
 
 static void* clone_bytecode_cache_blob_owner(void const* owner)
 {
-    return new Core::ImmutableBytes(*static_cast<Core::ImmutableBytes const*>(owner));
+    auto const& existing_owner = *static_cast<BytecodeCacheBlobOwner const*>(owner);
+    return new Core::ImmutableBytes(existing_owner.bytes);
 }
 
 DecodedBytecodeCacheBlob* decode_bytecode_cache_blob(Core::ImmutableBytes bytes, ProgramType expected_type, ReadonlyBytes source_hash)
 {
-    auto* owner = new Core::ImmutableBytes(move(bytes));
-    return rust_decode_bytecode_cache_blob_with_owner(owner->bytes().data(), owner->bytes().size(), static_cast<u8>(expected_type), source_hash.data(), source_hash.size(), owner, clone_bytecode_cache_blob_owner, free_bytecode_cache_blob_owner);
+    auto* owner = new BytecodeCacheBlobOwner { move(bytes) };
+    return rust_decode_bytecode_cache_blob_with_owner(owner->bytes.bytes().data(), owner->bytes.bytes().size(), static_cast<u8>(expected_type), source_hash.data(), source_hash.size(), owner, clone_bytecode_cache_blob_owner, free_bytecode_cache_blob_owner);
 }
 
-size_t decoded_bytecode_cache_source_length(DecodedBytecodeCacheBlob const* blob)
+DecodedBytecodeCacheBlob* decode_bytecode_cache_blob(Core::ImmutableBytes bytes, ProgramType expected_type, ReadonlyBytes source_hash, Core::EventLoop& event_loop)
 {
-    return rust_decoded_bytecode_cache_source_len(blob);
+    auto* owner = new BytecodeCacheBlobOwner { move(bytes), &event_loop };
+    return rust_decode_bytecode_cache_blob_with_owner(owner->bytes.bytes().data(), owner->bytes.bytes().size(), static_cast<u8>(expected_type), source_hash.data(), source_hash.size(), owner, clone_bytecode_cache_blob_owner, free_bytecode_cache_blob_owner);
+}
+
+bool validate_decoded_bytecode_cache_blob(DecodedBytecodeCacheBlob* blob, size_t source_length)
+{
+    return rust_validate_decoded_bytecode_cache_blob(blob, source_length);
 }
 
 void free_decoded_bytecode_cache_blob(DecodedBytecodeCacheBlob* blob)
@@ -458,7 +472,7 @@ void free_decoded_bytecode_cache_blob(DecodedBytecodeCacheBlob* blob)
 Optional<Result<ScriptResult, Vector<ParserError>>> compile_parsed_script(ParsedProgram* parsed, NonnullRefPtr<SourceCode const> source_code, Realm& realm)
 {
     if (!parsed)
-        return {};
+        return { };
 
     if (rust_parsed_program_has_errors(parsed)) {
         Vector<ParserError> parse_errors;
@@ -475,7 +489,7 @@ Optional<Result<ScriptResult, Vector<ParserError>>> compile_parsed_script(Parsed
     void* exec_ptr = rust_compile_parsed_script(parsed, &realm.vm(), source_code.ptr(), &builder.shared_function_data, &builder, length);
 
     if (!exec_ptr)
-        return Vector<ParserError> {};
+        return Vector<ParserError> { };
 
     builder.collect_shared_function_data();
     builder.result.executable = static_cast<Bytecode::Executable*>(exec_ptr);
@@ -485,7 +499,7 @@ Optional<Result<ScriptResult, Vector<ParserError>>> compile_parsed_script(Parsed
 Optional<Result<ScriptResult, Vector<ParserError>>> materialize_compiled_script(CompiledProgram* compiled, NonnullRefPtr<SourceCode const> source_code, Realm& realm)
 {
     if (!compiled)
-        return {};
+        return { };
 
     GC::DeferGC defer_gc(realm.vm().heap());
     ScriptGdiBuilder builder;
@@ -493,7 +507,7 @@ Optional<Result<ScriptResult, Vector<ParserError>>> materialize_compiled_script(
     void* exec_ptr = rust_materialize_compiled_script(compiled, &realm.vm(), source_code.ptr(), &builder.shared_function_data, &builder);
 
     if (!exec_ptr)
-        return Vector<ParserError> {};
+        return Vector<ParserError> { };
 
     builder.collect_shared_function_data();
     builder.result.executable = static_cast<Bytecode::Executable*>(exec_ptr);
@@ -503,16 +517,16 @@ Optional<Result<ScriptResult, Vector<ParserError>>> materialize_compiled_script(
 Optional<Result<ScriptResult, Vector<ParserError>>> materialize_bytecode_cache_script(DecodedBytecodeCacheBlob* blob, NonnullRefPtr<SourceCode const> source_code, Realm& realm)
 {
     if (!blob)
-        return {};
+        return { };
 
     GC::DeferGC defer_gc(realm.vm().heap());
-    TemporaryChange validate_cache_executables { s_validate_materialized_bytecode_cache_executables, true };
+    TemporaryChange skip_cache_executable_validation { s_skip_bytecode_validation_for_prevalidated_cache, true };
     ScriptGdiBuilder builder;
 
     void* exec_ptr = rust_materialize_bytecode_cache_script(blob, &realm.vm(), source_code.ptr(), source_code->length_in_code_units(), &builder.shared_function_data, &builder);
 
     if (!exec_ptr)
-        return Vector<ParserError> { ParserError { "Failed to materialize bytecode cache"_string, {} } };
+        return Vector<ParserError> { ParserError { "Failed to materialize bytecode cache"_string, { } } };
 
     builder.collect_shared_function_data();
     builder.result.executable = static_cast<Bytecode::Executable*>(exec_ptr);
@@ -538,7 +552,7 @@ Optional<Result<EvalResult, String>> compile_eval(
     CallerMode strict_caller, bool in_function, bool in_method,
     bool in_derived_constructor, bool in_class_field_initializer)
 {
-    auto source_code = SourceCode::create({}, code_string.utf16_string());
+    auto source_code = SourceCode::create({ }, code_string.utf16_string());
     auto const& code_view = source_code->code_view();
     auto length = code_view.length_in_code_units();
 
@@ -571,7 +585,7 @@ Optional<Result<EvalResult, String>> compile_eval(
 Optional<Result<ModuleResult, Vector<ParserError>>> compile_parsed_module(ParsedProgram* parsed, NonnullRefPtr<SourceCode const> source_code, Realm& realm)
 {
     if (!parsed)
-        return {};
+        return { };
 
     if (rust_parsed_program_has_errors(parsed)) {
         Vector<ParserError> parse_errors;
@@ -603,7 +617,7 @@ Optional<Result<ModuleResult, Vector<ParserError>>> compile_parsed_module(Parsed
         &builder, &callbacks, &tla_executable, length);
 
     if (!exec_ptr && !tla_executable)
-        return Vector<ParserError> {};
+        return Vector<ParserError> { };
 
     builder.collect_shared_function_data();
     if (tla_executable) {
@@ -614,7 +628,7 @@ Optional<Result<ModuleResult, Vector<ParserError>>> compile_parsed_module(Parsed
             vm, FunctionKind::Async,
             "module code with top-level await"_utf16_fly_string,
             0, 0, true, false, true,
-            Vector<Utf16FlyString> {}, NoSharedFunctionDataList {}, nullptr);
+            Vector<Utf16FlyString> { }, NoSharedFunctionDataList { }, nullptr);
         builder.result.tla_shared_data->m_is_module_wrapper = true;
         builder.result.tla_shared_data->m_uses_this = true;
         builder.result.tla_shared_data->m_function_environment_needed = true;
@@ -630,7 +644,7 @@ Optional<Result<ModuleResult, Vector<ParserError>>> compile_parsed_module(Parsed
 Optional<Result<ModuleResult, Vector<ParserError>>> materialize_compiled_module(CompiledProgram* compiled, NonnullRefPtr<SourceCode const> source_code, Realm& realm)
 {
     if (!compiled)
-        return {};
+        return { };
 
     GC::DeferGC defer_gc(realm.vm().heap());
     ModuleBuilder builder;
@@ -653,7 +667,7 @@ Optional<Result<ModuleResult, Vector<ParserError>>> materialize_compiled_module(
         &builder, &callbacks, &tla_executable);
 
     if (!exec_ptr && !tla_executable)
-        return Vector<ParserError> {};
+        return Vector<ParserError> { };
 
     builder.collect_shared_function_data();
     if (tla_executable) {
@@ -664,7 +678,7 @@ Optional<Result<ModuleResult, Vector<ParserError>>> materialize_compiled_module(
             vm, FunctionKind::Async,
             "module code with top-level await"_utf16_fly_string,
             0, 0, true, false, true,
-            Vector<Utf16FlyString> {}, NoSharedFunctionDataList {}, nullptr);
+            Vector<Utf16FlyString> { }, NoSharedFunctionDataList { }, nullptr);
         builder.result.tla_shared_data->m_is_module_wrapper = true;
         builder.result.tla_shared_data->m_uses_this = true;
         builder.result.tla_shared_data->m_function_environment_needed = true;
@@ -680,10 +694,10 @@ Optional<Result<ModuleResult, Vector<ParserError>>> materialize_compiled_module(
 Optional<Result<ModuleResult, Vector<ParserError>>> materialize_bytecode_cache_module(DecodedBytecodeCacheBlob* blob, NonnullRefPtr<SourceCode const> source_code, Realm& realm)
 {
     if (!blob)
-        return {};
+        return { };
 
     GC::DeferGC defer_gc(realm.vm().heap());
-    TemporaryChange validate_cache_executables { s_validate_materialized_bytecode_cache_executables, true };
+    TemporaryChange skip_cache_executable_validation { s_skip_bytecode_validation_for_prevalidated_cache, true };
     ModuleBuilder builder;
     ModuleCallbacks callbacks {
         .set_has_top_level_await = module_set_has_top_level_await,
@@ -704,7 +718,7 @@ Optional<Result<ModuleResult, Vector<ParserError>>> materialize_bytecode_cache_m
         &builder, &callbacks, &tla_executable);
 
     if (!exec_ptr && !tla_executable)
-        return Vector<ParserError> { ParserError { "Failed to materialize bytecode cache"_string, {} } };
+        return Vector<ParserError> { ParserError { "Failed to materialize bytecode cache"_string, { } } };
 
     builder.collect_shared_function_data();
     if (tla_executable) {
@@ -715,7 +729,7 @@ Optional<Result<ModuleResult, Vector<ParserError>>> materialize_bytecode_cache_m
             vm, FunctionKind::Async,
             "module code with top-level await"_utf16_fly_string,
             0, 0, true, false, true,
-            Vector<Utf16FlyString> {}, NoSharedFunctionDataList {}, nullptr);
+            Vector<Utf16FlyString> { }, NoSharedFunctionDataList { }, nullptr);
         builder.result.tla_shared_data->m_is_module_wrapper = true;
         builder.result.tla_shared_data->m_uses_this = true;
         builder.result.tla_shared_data->m_function_environment_needed = true;
@@ -731,7 +745,7 @@ Optional<Result<ModuleResult, Vector<ParserError>>> materialize_bytecode_cache_m
 GC::Ptr<Bytecode::Executable> try_install_bytecode_cache_script(DecodedBytecodeCacheBlob* blob, NonnullRefPtr<SourceCode const> source_code, Realm& realm, Bytecode::Executable& existing_executable, ReadonlySpan<SharedFunctionInstanceData*> existing_shared_function_data)
 {
     if (!blob)
-        return {};
+        return { };
 
     Vector<void*> existing_shared_function_data_ptrs;
     existing_shared_function_data_ptrs.ensure_capacity(existing_shared_function_data.size());
@@ -741,7 +755,7 @@ GC::Ptr<Bytecode::Executable> try_install_bytecode_cache_script(DecodedBytecodeC
     GC::Root<Bytecode::Executable> executable;
     {
         GC::DeferGC defer_gc(realm.vm().heap());
-        TemporaryChange validate_cache_executables { s_validate_materialized_bytecode_cache_executables, true };
+        TemporaryChange skip_cache_executable_validation { s_skip_bytecode_validation_for_prevalidated_cache, true };
 
         executable = static_cast<Bytecode::Executable*>(rust_install_bytecode_cache_script(
             blob, &realm.vm(), source_code.ptr(), source_code->length_in_code_units(), &existing_executable,
@@ -763,7 +777,7 @@ GC::Ref<Bytecode::Executable> install_generated_bytecode_cache_script(DecodedByt
 Optional<ModuleBytecodeCacheInstallResult> try_install_bytecode_cache_module(DecodedBytecodeCacheBlob* blob, NonnullRefPtr<SourceCode const> source_code, Realm& realm, Bytecode::Executable* existing_executable, ReadonlySpan<SharedFunctionInstanceData*> existing_shared_function_data, SharedFunctionInstanceData* existing_top_level_await_shared_data)
 {
     if (!blob)
-        return {};
+        return { };
 
     Vector<void*> existing_shared_function_data_ptrs;
     existing_shared_function_data_ptrs.ensure_capacity(existing_shared_function_data.size());
@@ -771,7 +785,7 @@ Optional<ModuleBytecodeCacheInstallResult> try_install_bytecode_cache_module(Dec
         existing_shared_function_data_ptrs.unchecked_append(function);
 
     GC::DeferGC defer_gc(realm.vm().heap());
-    TemporaryChange validate_cache_executables { s_validate_materialized_bytecode_cache_executables, true };
+    TemporaryChange skip_cache_executable_validation { s_skip_bytecode_validation_for_prevalidated_cache, true };
 
     void* top_level_await_executable = nullptr;
     auto* exec = static_cast<Bytecode::Executable*>(rust_install_bytecode_cache_module(
@@ -780,7 +794,7 @@ Optional<ModuleBytecodeCacheInstallResult> try_install_bytecode_cache_module(Dec
         existing_top_level_await_shared_data, &top_level_await_executable));
 
     if (!exec && !top_level_await_executable)
-        return {};
+        return { };
 
     ModuleBytecodeCacheInstallResult result;
     if (exec) {
@@ -819,7 +833,7 @@ Optional<Result<GC::Ref<SharedFunctionInstanceData>, String>> compile_dynamic_fu
     VM& vm, StringView source_text, StringView parameters_string, StringView body_parse_string,
     FunctionKind kind)
 {
-    auto source_code = SourceCode::create({}, Utf16String::from_utf8(source_text));
+    auto source_code = SourceCode::create({ }, Utf16String::from_utf8(source_text));
     auto const& code_view = source_code->code_view();
     auto full_length = code_view.length_in_code_units();
 
@@ -899,7 +913,7 @@ GC::Ptr<Bytecode::Executable> compile_function(VM& vm, SharedFunctionInstanceDat
 
     if (shared_data.m_cached_bytecode_executable) {
         GC::DeferGC defer_gc(vm.heap());
-        TemporaryChange validate_cache_executables { s_validate_materialized_bytecode_cache_executables, true };
+        TemporaryChange skip_cache_executable_validation { s_skip_bytecode_validation_for_prevalidated_cache, true };
         auto* exec = static_cast<Bytecode::Executable*>(rust_materialize_bytecode_cache_function(
             shared_data.m_cached_bytecode_executable,
             &vm,
@@ -1037,7 +1051,7 @@ static JS::Value decode_constant(JS::VM& vm, uint8_t const* begin, uint8_t const
         cursor += 4;
         VERIFY(len <= static_cast<size_t>(end - cursor) / sizeof(char16_t));
         if (len == 0)
-            return JS::PrimitiveString::create(vm, Utf16String {});
+            return JS::PrimitiveString::create(vm, Utf16String { });
         auto string_byte_length = static_cast<size_t>(len) * sizeof(char16_t);
         auto str = [&] {
             if (constant_cursor_is_aligned(cursor, alignof(char16_t)))
@@ -1258,16 +1272,13 @@ extern "C" void* rust_create_executable(
         delete bp;
     }
 
-    auto const is_materializing_bytecode_cache = JS::RustIntegration::s_validate_materialized_bytecode_cache_executables;
 #if !defined(NDEBUG) || defined(HAS_ADDRESS_SANITIZER)
-    auto const should_validate_bytecode = true;
+    auto const should_validate_bytecode = !JS::RustIntegration::s_skip_bytecode_validation_for_prevalidated_cache;
 #else
-    auto const should_validate_bytecode = is_materializing_bytecode_cache;
+    auto const should_validate_bytecode = false;
 #endif
     if (should_validate_bytecode) {
         if (auto validation = JS::Bytecode::validate_bytecode(*executable, basic_block_offsets.span()); validation.is_error()) {
-            if (is_materializing_bytecode_cache)
-                return nullptr;
 #if !defined(NDEBUG) || defined(HAS_ADDRESS_SANITIZER)
             VERIFY_NOT_REACHED();
 #else
@@ -1291,7 +1302,7 @@ static GC::Ref<JS::SharedFunctionInstanceData> create_shared_function_instance_d
 
     auto fn_name = data->name_len > 0
         ? Utf16FlyString::from_utf16(Utf16View(reinterpret_cast<char16_t const*>(data->name), data->name_len))
-        : Utf16FlyString {};
+        : Utf16FlyString { };
 
     Vector<Utf16FlyString> mapped_param_names;
     if (data->has_simple_parameter_list) {
@@ -1332,7 +1343,7 @@ extern "C" void* rust_create_sfd(
     void const* source_code_ptr,
     FFISharedFunctionData const* data)
 {
-    return create_shared_function_instance_data(vm_ptr, source_code_ptr, data, JS::NoSharedFunctionDataList {}).ptr();
+    return create_shared_function_instance_data(vm_ptr, source_code_ptr, data, JS::NoSharedFunctionDataList { }).ptr();
 }
 
 extern "C" void* rust_create_sfd_in_list(
@@ -1677,7 +1688,7 @@ extern "C" void* rust_compile_regex(
     auto pattern_str = parsed_pattern.release_value();
 
     // Build compile flags from the flag characters.
-    regex::ECMAScriptCompileFlags compile_flags {};
+    regex::ECMAScriptCompileFlags compile_flags { };
     for (size_t i = 0; i < flags_view.length_in_code_units(); ++i) {
         auto ch = flags_view.code_unit_at(i);
         switch (ch) {

@@ -82,7 +82,7 @@ public:
             re.record.record.visit(
                 [&](Messages::Records::A const& a) { result.append(a.address); },
                 [&](Messages::Records::AAAA const& aaaa) { result.append(aaaa.address); },
-                [](auto&) {});
+                [](auto&) { });
         }
         return result;
     }
@@ -207,7 +207,7 @@ private:
 
     Vector<RecordWithExpiration> m_cached_records;
     HashTable<Messages::ResourceType> m_desired_types;
-    Vector<Messages::Records::DNSKEY> m_used_dnskeys {};
+    Vector<Messages::Records::DNSKEY> m_used_dnskeys { };
     HashTable<u16> m_seen_key_tags;
     u16 m_id { 0 };
 };
@@ -233,7 +233,7 @@ public:
         bool validate_dnssec_locally { false };
         PendingLookup* repeating_lookup { nullptr };
 
-        static LookupOptions default_() { return {}; }
+        static LookupOptions default_() { return { }; }
     };
 
     struct SocketResult {
@@ -252,7 +252,7 @@ public:
         auto promise = Core::Promise<Empty>::construct();
         m_socket_ready_promises.append(promise);
         if (has_connection(false)) {
-            promise->resolve({});
+            promise->resolve({ });
             return promise;
         }
 
@@ -264,7 +264,7 @@ public:
 
     void reset_connection()
     {
-        m_socket.with_write_locked([&](auto& socket) { socket = {}; });
+        m_socket.with_write_locked([&](auto& socket) { socket = { }; });
     }
 
     NonnullRefPtr<LookupResult const> expect_cached(StringView name, Messages::Class class_ = Messages::Class::IN)
@@ -290,7 +290,7 @@ public:
         return m_cache.with_read_locked([&](auto& cache) -> RefPtr<LookupResult const> {
             auto it = cache.find(name);
             if (it == cache.end())
-                return {};
+                return { };
 
             auto& result = *it->value;
             // For completed lookups, treat a previously-asked-about type with no records as a hit (negative cache)
@@ -299,7 +299,7 @@ public:
             auto allow_negative_cache = result.is_done();
             for (auto const& type : desired_types) {
                 if (!result.has_record_of_type(type, allow_negative_cache))
-                    return {};
+                    return { };
             }
 
             return result;
@@ -376,8 +376,8 @@ public:
         if (auto maybe_ipv4 = IPv4Address::from_string(name); maybe_ipv4.has_value()) {
             dbgln_if(DNS_DEBUG, "DNS: Resolving {} as IPv4", name);
             if (desired_types.contains_slow(Messages::ResourceType::A)) {
-                auto result = make_ref_counted<LookupResult>(Messages::DomainName {});
-                result->add_record({ .name = {}, .type = Messages::ResourceType::A, .class_ = Messages::Class::IN, .ttl = 0, .record = Messages::Records::A { maybe_ipv4.release_value() }, .raw = {} });
+                auto result = make_ref_counted<LookupResult>(Messages::DomainName { });
+                result->add_record({ .name = { }, .type = Messages::ResourceType::A, .class_ = Messages::Class::IN, .ttl = 0, .record = Messages::Records::A { maybe_ipv4.release_value() }, .raw = { } });
                 result->finished_request();
                 promise->resolve(move(result));
                 lookup_path = "literal-ipv4"sv;
@@ -388,8 +388,8 @@ public:
         if (auto maybe_ipv6 = IPv6Address::from_string(name); maybe_ipv6.has_value()) {
             dbgln_if(DNS_DEBUG, "DNS: Resolving {} as IPv6", name);
             if (desired_types.contains_slow(Messages::ResourceType::AAAA)) {
-                auto result = make_ref_counted<LookupResult>(Messages::DomainName {});
-                result->add_record({ .name = {}, .type = Messages::ResourceType::AAAA, .class_ = Messages::Class::IN, .ttl = 0, .record = Messages::Records::AAAA { maybe_ipv6.release_value() }, .raw = {} });
+                auto result = make_ref_counted<LookupResult>(Messages::DomainName { });
+                result->add_record({ .name = { }, .type = Messages::ResourceType::AAAA, .class_ = Messages::Class::IN, .ttl = 0, .record = Messages::Records::AAAA { maybe_ipv6.release_value() }, .raw = { } });
                 result->finished_request();
                 promise->resolve(move(result));
                 lookup_path = "literal-ipv6"sv;
@@ -404,9 +404,9 @@ public:
             dbgln_if(DNS_DEBUG, "DNS: Resolving {} as loopback", name);
             auto result = make_ref_counted<LookupResult>(Messages::DomainName::from_string(name));
             if (desired_types.contains_slow(Messages::ResourceType::A))
-                result->add_record({ .name = {}, .type = Messages::ResourceType::A, .class_ = Messages::Class::IN, .ttl = 0, .record = Messages::Records::A { IPv4Address { 127, 0, 0, 1 } }, .raw = {} });
+                result->add_record({ .name = { }, .type = Messages::ResourceType::A, .class_ = Messages::Class::IN, .ttl = 0, .record = Messages::Records::A { IPv4Address { 127, 0, 0, 1 } }, .raw = { } });
             if (desired_types.contains_slow(Messages::ResourceType::AAAA))
-                result->add_record({ .name = {}, .type = Messages::ResourceType::AAAA, .class_ = Messages::Class::IN, .ttl = 0, .record = Messages::Records::AAAA { IPv6Address::loopback() }, .raw = {} });
+                result->add_record({ .name = { }, .type = Messages::ResourceType::AAAA, .class_ = Messages::Class::IN, .ttl = 0, .record = Messages::Records::AAAA { IPv6Address::loopback() }, .raw = { } });
             result->finished_request();
             promise->resolve(move(result));
             lookup_path = "localhost-loopback"sv;
@@ -479,12 +479,12 @@ public:
 
             lookup_path = "system-resolver-bg"sv;
 
-            auto main_thread_event_loop_reference = Core::EventLoop::current_weak();
+            auto& main_thread_event_loop = Core::EventLoop::current();
 
             auto submit_worker = [&, this](Core::Socket::AddressFamily family) {
                 Threading::ThreadPool::the().submit(
                     [this, name, state = our_state, family,
-                        main_thread_event_loop_reference]() mutable {
+                        &main_thread_event_loop]() mutable {
                         auto worker_started_at = MonotonicTime::now();
                         auto record_or_error = Core::Socket::resolve_host(name, Core::Socket::SocketType::Stream, family);
                         auto worker_finished_at = MonotonicTime::now();
@@ -493,11 +493,7 @@ public:
                             .work_ms = (worker_finished_at - worker_started_at).to_milliseconds(),
                         };
 
-                        auto main_thread_event_loop = main_thread_event_loop_reference->take();
-                        if (!main_thread_event_loop)
-                            return;
-
-                        main_thread_event_loop->deferred_invoke(
+                        main_thread_event_loop.deferred_invoke(
                             [this, name, state, family,
                                 record_or_error = move(record_or_error),
                                 timing]() mutable {
@@ -615,7 +611,7 @@ public:
             auto opt = Messages::Records::OPT {
                 .udp_payload_size = 4096,
                 .extended_rcode_and_flags = 0,
-                .options = {},
+                .options = { },
             };
             opt.set_dnssec_ok(true);
 
@@ -625,7 +621,7 @@ public:
                 .class_ = class_,
                 .ttl = 0,
                 .record = move(opt),
-                .raw = {},
+                .raw = { },
             });
         }
 
@@ -658,7 +654,7 @@ public:
             promise->on_resolution = [user_promise, cached_promise = cached_entry->promise](auto& result) {
                 user_promise->resolve(*result);
                 cached_promise->resolve(*result);
-                return ErrorOr<void> {};
+                return ErrorOr<void> { };
             };
             promise->on_rejection = [user_promise, cached_promise = cached_entry->promise](auto& error) {
                 user_promise->reject(Error::copy(error));
@@ -777,11 +773,11 @@ private:
             for (auto const& record : record_or_error.value()) {
                 record.visit(
                     [&](IPv4Address const& address) {
-                        state.result->add_record({ .name = {}, .type = Messages::ResourceType::A, .class_ = Messages::Class::IN, .ttl = SYSTEM_RESOLVER_SYNTHETIC_TTL_SECONDS, .record = Messages::Records::A { address }, .raw = {} });
+                        state.result->add_record({ .name = { }, .type = Messages::ResourceType::A, .class_ = Messages::Class::IN, .ttl = SYSTEM_RESOLVER_SYNTHETIC_TTL_SECONDS, .record = Messages::Records::A { address }, .raw = { } });
                         got_records_this_side = true;
                     },
                     [&](IPv6Address const& address) {
-                        state.result->add_record({ .name = {}, .type = Messages::ResourceType::AAAA, .class_ = Messages::Class::IN, .ttl = SYSTEM_RESOLVER_SYNTHETIC_TTL_SECONDS, .record = Messages::Records::AAAA { address }, .raw = {} });
+                        state.result->add_record({ .name = { }, .type = Messages::ResourceType::AAAA, .class_ = Messages::Class::IN, .ttl = SYSTEM_RESOLVER_SYNTHETIC_TTL_SECONDS, .record = Messages::Records::AAAA { address }, .raw = { } });
                         got_records_this_side = true;
                     });
             }
@@ -869,7 +865,7 @@ private:
 
                 if (lookup->result.is_null()) {
                     dbgln_if(DNS_DEBUG, "DNS: Received a message with no pending lookup (id={})", message.header.id);
-                    return {}; // Message is a response to a lookup that's been purged from the cache, ignore it
+                    return { }; // Message is a response to a lookup that's been purged from the cache, ignore it
                 }
 
                 lookup->repeat_timer->stop();
@@ -900,7 +896,7 @@ private:
                 result->finished_request();
                 lookup->promise->resolve(*result);
                 lookups->remove(message.header.id);
-                return {};
+                return { };
             });
             if (result.is_error())
                 dbgln_if(DNS_DEBUG, "DNS: Received a message with no pending lookup: {}", result.error());
@@ -1013,19 +1009,19 @@ private:
                 if (auto found = records_with_rrsigs.get(type); found.has_value())
                     found->rrsig = move(rrsig);
                 else
-                    records_with_rrsigs.set(type, { {}, move(rrsig) });
+                    records_with_rrsigs.set(type, { { }, move(rrsig) });
             } else {
                 auto type = record.type;
                 if (auto found = records_with_rrsigs.get(record.type); found.has_value())
                     found->records.append(move(record));
                 else
-                    records_with_rrsigs.set(type, { { move(record) }, {} });
+                    records_with_rrsigs.set(type, { { move(record) }, { } });
             }
         }
 
         if (records_with_rrsigs.is_empty()) {
             dbgln_if(DNS_DEBUG, "DNS: No RRSIG records found in DNSSEC response");
-            return {};
+            return { };
         }
 
         auto name = result->name();
@@ -1103,7 +1099,7 @@ private:
                                 return relevant_keys;
                             }();
                             dbgln_if(DNS_DEBUG, "DNS: Found {} relevant DNSKEYs for key {}", dnskeys.size(), key);
-                            rrsets_with_rrsigs.set(key, CanonicalizedRRSetWithRRSIG { {}, move(rrsig), move(dnskeys) });
+                            rrsets_with_rrsigs.set(key, CanonicalizedRRSetWithRRSIG { { }, move(rrsig), move(dnskeys) });
                         }
                         auto& rrset_with_rrsig = *rrsets_with_rrsigs.get(key);
                         rrset_with_rrsig.rrset.append(move(record));
@@ -1169,7 +1165,7 @@ private:
                 });
         });
 
-        return {};
+        return { };
     }
 
     Messages::Records::DNSKEY const* find_dnskey(CanonicalizedRRSetWithRRSIG const& rrset_with_rrsig)
@@ -1273,7 +1269,7 @@ private:
             md5->update(to_be_signed.data(), to_be_signed.size());
             auto digest = md5->digest();
 
-            auto public_key = TRY_OR_REJECT_PROMISE(promise, Crypto::PK::RSA::parse_rsa_key(dnskey.public_key, false, {}));
+            auto public_key = TRY_OR_REJECT_PROMISE(promise, Crypto::PK::RSA::parse_rsa_key(dnskey.public_key, false, { }));
 
             auto const& signature_data = rrsig.signature; // ByteBuffer with raw RSA/MD5 signature
             if (signature_data.is_empty()) {
@@ -1291,7 +1287,7 @@ private:
         }
         case Messages::DNSSEC::Algorithm::ECDSAP256SHA256: {
             auto sha256 = Crypto::Hash::SHA256::hash(to_be_signed);
-            auto keys = TRY_OR_REJECT_PROMISE(promise, Crypto::PK::EC::parse_ec_key(dnskey.public_key, false, {}));
+            auto keys = TRY_OR_REJECT_PROMISE(promise, Crypto::PK::EC::parse_ec_key(dnskey.public_key, false, { }));
             auto signature = TRY_OR_REJECT_PROMISE(promise, Crypto::Curves::SECPxxxr1Signature::from_raw(Crypto::ASN1::secp256r1_oid, rrsig.signature));
             Crypto::Curves::SECP256r1 curve;
             if (auto ok = TRY_OR_REJECT_PROMISE(promise, curve.verify(sha256.bytes(), keys.public_key.to_secpxxxr1_point(), signature)); !ok) {
@@ -1302,7 +1298,7 @@ private:
         }
         case Messages::DNSSEC::Algorithm::ECDSAP384SHA384: {
             auto sha384 = Crypto::Hash::SHA384::hash(to_be_signed);
-            auto keys = TRY_OR_REJECT_PROMISE(promise, Crypto::PK::EC::parse_ec_key(dnskey.public_key, false, {}));
+            auto keys = TRY_OR_REJECT_PROMISE(promise, Crypto::PK::EC::parse_ec_key(dnskey.public_key, false, { }));
             auto signature = TRY_OR_REJECT_PROMISE(promise, Crypto::Curves::SECPxxxr1Signature::from_raw(Crypto::ASN1::secp384r1_oid, rrsig.signature));
             Crypto::Curves::SECP384r1 curve;
             if (auto ok = TRY_OR_REJECT_PROMISE(promise, curve.verify(sha384.bytes(), keys.public_key.to_secpxxxr1_point(), signature)); !ok) {
@@ -1365,7 +1361,7 @@ private:
                 result->add_record(move(record));
 
             // Resolve with an empty success.
-            promise->resolve({});
+            promise->resolve({ });
         }
 
         return promise;
@@ -1404,7 +1400,7 @@ private:
         });
 
         for (auto& promise : m_socket_ready_promises)
-            promise->resolve({});
+            promise->resolve({ });
 
         m_socket_ready_promises.clear();
     }

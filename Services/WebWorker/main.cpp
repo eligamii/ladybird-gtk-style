@@ -77,7 +77,7 @@ ErrorOr<int> ladybird_main(Main::Arguments arguments)
 
     auto worker_type = TRY(agent_type_from_string(worker_type_string));
 
-    Core::EventLoop event_loop;
+    auto& event_loop = Core::EventLoop::initialize_for_current_thread();
 
     WebView::platform_init();
 
@@ -121,7 +121,7 @@ static ErrorOr<void> connect_to_resource_loader(GC::Heap& heap, IPC::TransportHa
         Web::ResourceLoader::the().set_client(move(request_client));
     else
         Web::ResourceLoader::initialize(heap, move(request_client));
-    return {};
+    return { };
 }
 
 static ErrorOr<void> connect_to_image_decoder(IPC::TransportHandle const& handle)
@@ -136,5 +136,5 @@ static ErrorOr<void> connect_to_image_decoder(IPC::TransportHandle const& handle
         static_cast<WebView::ImageCodecPlugin&>(Web::Platform::ImageCodecPlugin::the()).set_client(move(new_client));
     else
         Web::Platform::ImageCodecPlugin::install(*new WebView::ImageCodecPlugin(move(new_client)));
-    return {};
+    return { };
 }

@@ -297,9 +297,11 @@ void StackingContext::paint_internal(DisplayListRecordingContext& context) const
     // Draw the background and borders for block-level children (step 4)
     paint_descendants(context, paintable_box(), StackingContextPaintPhase::BackgroundAndBorders);
     // Draw the non-positioned floats (step 5)
-    paint_descendants(context, paintable_box(), StackingContextPaintPhase::Floats);
+    if (!m_non_positioned_floating_descendants.is_empty())
+        paint_descendants(context, paintable_box(), StackingContextPaintPhase::Floats);
     // Draw inline content, replaced content, etc. (steps 6, 7)
-    paint_descendants(context, paintable_box(), StackingContextPaintPhase::BackgroundAndBordersForInlineLevelAndReplaced);
+    if (m_contains_inline_or_replaced_descendants)
+        paint_descendants(context, paintable_box(), StackingContextPaintPhase::BackgroundAndBordersForInlineLevelAndReplaced);
     paint_node(paintable_box(), context, PaintPhase::Foreground);
     paint_descendants(context, paintable_box(), StackingContextPaintPhase::Foreground);
 
@@ -373,9 +375,9 @@ void StackingContext::paint(DisplayListRecordingContext& context) const
         auto mask_painting_context = context.clone(display_list_recorder);
         auto absolute_mask_rect = paintable_box().absolute_border_box_rect();
         auto mask_rect_in_device_pixels = context.enclosing_device_rect(absolute_mask_rect);
-        auto mask_rect = CSSPixelRect { {}, absolute_mask_rect.size() };
-        auto resolved_mask = resolve_background_layers(mask_layers, paintable_box(), Color::Transparent, CSS::BackgroundBox::BorderBox, mask_rect, {});
-        paint_background(mask_painting_context, paintable_box(), CSS::ImageRendering::Auto, resolved_mask, {});
+        auto mask_rect = CSSPixelRect { { }, absolute_mask_rect.size() };
+        auto resolved_mask = resolve_background_layers(mask_layers, paintable_box(), Color::Transparent, CSS::BackgroundBox::BorderBox, mask_rect, { });
+        paint_background(mask_painting_context, paintable_box(), CSS::ImageRendering::Auto, resolved_mask, { });
         masks.append({ { *mask_display_list, move(visual_context_tree) }, mask_rect_in_device_pixels.to_type<int>(), Gfx::MaskKind::Alpha });
     }
 

@@ -22,17 +22,19 @@ class WebContentView;
 
 class BrowserWindow {
 public:
-    BrowserWindow(AdwApplication* app, Vector<URL::URL> const& initial_urls);
+    BrowserWindow(AdwApplication* app);
     ~BrowserWindow();
 
     GtkWindow* gtk_window() const { return GTK_WINDOW(m_window); }
 
     Tab& create_new_tab(Web::HTML::ActivateTab activate_tab);
-    Tab& create_new_tab(URL::URL const& url, Web::HTML::ActivateTab activate_tab);
+    Tab& create_new_tab(URL::URL const& url, Web::HTML::ActivateTab activate_tab, int pos = -1);
     Tab& create_child_tab(Web::HTML::ActivateTab activate_tab, Tab& parent, u64 page_index);
     void close_tab(Tab& tab);
     void close_current_tab();
     Tab* current_tab() const;
+    Optional<NonnullOwnPtr<Tab>&> tab_for_tab_page(AdwTabPage* page);
+    Optional<NonnullOwnPtr<Tab>&> right_clicked_tab();
     WebContentView* view() const;
     void present();
     int tab_count() const;
@@ -67,11 +69,14 @@ private:
     void on_tab_switched();
     void bind_navigation_actions(WebContentView& view);
 
+    static OwnPtr<Tab> s_detached_tab;
+
     AdwApplicationWindow* m_window { nullptr };
     LadybirdLocationEntry* m_location_entry { nullptr };
     Vector<NonnullOwnPtr<Tab>> m_tabs;
 
     AdwTabView* m_tab_view { nullptr };
+    AdwTabOverview* m_tab_overview { nullptr };
     AdwHeaderBar* m_header_bar { nullptr };
     GtkButton* m_restore_button { nullptr };
     GtkLabel* m_zoom_label { nullptr };
@@ -83,6 +88,9 @@ private:
     GtkLabel* m_status_text { nullptr };
 
     guint m_status_text_hide_timeout_source_id { 0 };
+
+    bool is_tab_menu_opened { false };
+    AdwTabPage* m_right_clicked_tab { nullptr };
 
     struct ActionBinding {
         WebView::Action* action { nullptr };

@@ -27,7 +27,7 @@ namespace Ladybird {
 
 Application::Application() = default;
 
-NonnullOwnPtr<Core::EventLoop> Application::create_platform_event_loop()
+Core::EventLoop& Application::create_platform_event_loop()
 {
     if (!browser_options().headless_mode.has_value()) {
         Core::EventLoopManager::install(*new EventLoopManagerMacOS);
@@ -43,7 +43,7 @@ Optional<WebView::ViewImplementation&> Application::active_web_view() const
 
     if (auto* tab = [delegate activeTab])
         return [[tab web_view] view];
-    return {};
+    return { };
 }
 
 Optional<WebView::ViewImplementation&> Application::open_blank_new_tab(Web::HTML::ActivateTab activate_tab) const
@@ -70,10 +70,10 @@ Optional<ByteString> Application::ask_user_for_download_path(StringView file) co
 {
     auto* panel = [NSSavePanel savePanel];
     [panel setNameFieldStringValue:Ladybird::string_to_ns_string(file)];
-    [panel setTitle:@"Select save location"];
+    [panel setTitle:@ "Select save location"];
 
     if ([panel runModal] != NSModalResponseOK)
-        return {};
+        return { };
 
     return Ladybird::ns_string_to_byte_string([[panel URL] path]);
 }
@@ -86,15 +86,15 @@ void Application::display_download_confirmation_dialog(StringView download_name,
 
     auto* dialog = [[NSAlert alloc] init];
     [dialog setMessageText:Ladybird::string_to_ns_string(message)];
-    [[dialog addButtonWithTitle:@"OK"] setTag:NSModalResponseOK];
-    [[dialog addButtonWithTitle:@"Open folder"] setTag:NSModalResponseContinue];
+    [[dialog addButtonWithTitle:@ "OK"] setTag:NSModalResponseOK];
+    [[dialog addButtonWithTitle:@ "Open folder"] setTag:NSModalResponseContinue];
 
     __block auto* ns_path = Ladybird::string_to_ns_string(path.string());
 
     [dialog beginSheetModalForWindow:[delegate activeTab]
                    completionHandler:^(NSModalResponse response) {
                        if (response == NSModalResponseContinue) {
-                           [[NSWorkspace sharedWorkspace] selectFile:ns_path inFileViewerRootedAtPath:@""];
+                           [[NSWorkspace sharedWorkspace] selectFile:ns_path inFileViewerRootedAtPath:@ ""];
                        }
                    }];
 }
@@ -116,7 +116,7 @@ Utf16String Application::clipboard_text(ClipboardType) const
 
     if (auto* contents = [paste_board stringForType:NSPasteboardTypeString])
         return Ladybird::ns_string_to_utf16_string(contents);
-    return {};
+    return { };
 }
 
 Vector<Web::Clipboard::SystemClipboardRepresentation> Application::clipboard_entries() const
@@ -193,11 +193,11 @@ Optional<Application::BookmarkID> Application::bookmark_item_id_for_context_menu
             .id = Ladybird::ns_string_to_string([bookmarks_bar selected_bookmark_menu_item_id]),
             .target_folder_id = [bookmarks_bar selected_bookmark_menu_target_folder_id]
                 ? Optional<String> { Ladybird::ns_string_to_string([bookmarks_bar selected_bookmark_menu_target_folder_id]) }
-                : Optional<String> {},
+                : Optional<String> { },
         };
     }
 
-    return {};
+    return { };
 }
 
 static constexpr CGFloat BOOKMARK_LABEL_WIDTH = 40;
@@ -252,8 +252,8 @@ static NSAlert* create_bookmark_dialog(NSString* title, NSView* first_responder,
     auto* dialog = [[NSAlert alloc] init];
     [dialog setAccessoryView:container];
     [dialog setMessageText:title];
-    [[dialog addButtonWithTitle:@"OK"] setTag:NSModalResponseOK];
-    [[dialog addButtonWithTitle:@"Cancel"] setTag:NSModalResponseCancel];
+    [[dialog addButtonWithTitle:@ "OK"] setTag:NSModalResponseOK];
+    [[dialog addButtonWithTitle:@ "Cancel"] setTag:NSModalResponseCancel];
     [[dialog window] setInitialFirstResponder:first_responder];
 
     return dialog;
@@ -272,8 +272,8 @@ static NonnullRefPtr<PromiseType> display_add_or_edit_bookmark_dialog(
     auto* title_field = create_bookmark_dialog_text_field(current_title);
 
     auto* dialog = create_bookmark_dialog(title, url_field, @[
-        create_bookmark_dialog_row(@"URL:", url_field),
-        create_bookmark_dialog_row(@"Title:", title_field),
+        create_bookmark_dialog_row(@ "URL:", url_field),
+        create_bookmark_dialog_row(@ "Title:", title_field),
     ]);
 
     [dialog beginSheetModalForWindow:parent
@@ -296,7 +296,7 @@ static NonnullRefPtr<PromiseType> display_add_or_edit_bookmark_dialog(
                        promise->resolve(WebView::BookmarkItem::Bookmark {
                            .url = url.release_value(),
                            .title = move(bookmark_title),
-                           .favicon_base64_png = {},
+                           .favicon_base64_png = { },
                        });
                    }];
 
@@ -315,13 +315,13 @@ NonnullRefPtr<Application::BookmarkPromise> Application::display_add_bookmark_di
         current_title = view->title().to_utf8();
     }
 
-    return display_add_or_edit_bookmark_dialog<BookmarkPromise>([delegate activeTab], @"Add Bookmark", current_url, current_title);
+    return display_add_or_edit_bookmark_dialog<BookmarkPromise>([delegate activeTab], @ "Add Bookmark", current_url, current_title);
 }
 
 NonnullRefPtr<Application::BookmarkPromise> Application::display_edit_bookmark_dialog(WebView::BookmarkItem::Bookmark const& current_bookmark) const
 {
     ApplicationDelegate* delegate = [NSApp delegate];
-    return display_add_or_edit_bookmark_dialog<BookmarkPromise>([delegate activeTab], @"Edit Bookmark", current_bookmark.url, current_bookmark.title);
+    return display_add_or_edit_bookmark_dialog<BookmarkPromise>([delegate activeTab], @ "Edit Bookmark", current_bookmark.url, current_bookmark.title);
 }
 
 template<typename PromiseType>
@@ -335,7 +335,7 @@ static NonnullRefPtr<PromiseType> display_add_or_edit_bookmark_folder_dialog(
     auto* title_field = create_bookmark_dialog_text_field(current_title);
 
     auto* dialog = create_bookmark_dialog(title, title_field, @[
-        create_bookmark_dialog_row(@"Title:", title_field),
+        create_bookmark_dialog_row(@ "Title:", title_field),
     ]);
 
     [dialog beginSheetModalForWindow:parent
@@ -351,7 +351,7 @@ static NonnullRefPtr<PromiseType> display_add_or_edit_bookmark_folder_dialog(
 
                        promise->resolve(WebView::BookmarkItem::Folder {
                            .title = move(folder_title),
-                           .children = {},
+                           .children = { },
                        });
                    }];
 
@@ -361,13 +361,13 @@ static NonnullRefPtr<PromiseType> display_add_or_edit_bookmark_folder_dialog(
 NonnullRefPtr<Application::BookmarkFolderPromise> Application::display_add_bookmark_folder_dialog() const
 {
     ApplicationDelegate* delegate = [NSApp delegate];
-    return display_add_or_edit_bookmark_folder_dialog<BookmarkFolderPromise>([delegate activeTab], @"Add Folder", {});
+    return display_add_or_edit_bookmark_folder_dialog<BookmarkFolderPromise>([delegate activeTab], @ "Add Folder", { });
 }
 
 NonnullRefPtr<Application::BookmarkFolderPromise> Application::display_edit_bookmark_folder_dialog(WebView::BookmarkItem::Folder const& current_folder) const
 {
     ApplicationDelegate* delegate = [NSApp delegate];
-    return display_add_or_edit_bookmark_folder_dialog<BookmarkFolderPromise>([delegate activeTab], @"Edit Folder", current_folder.title);
+    return display_add_or_edit_bookmark_folder_dialog<BookmarkFolderPromise>([delegate activeTab], @ "Edit Folder", current_folder.title);
 }
 
 void Application::on_devtools_enabled() const

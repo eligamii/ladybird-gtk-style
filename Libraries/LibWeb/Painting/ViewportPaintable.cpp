@@ -11,6 +11,7 @@
 #include <LibWeb/DOM/Text.h>
 #include <LibWeb/HTML/Navigable.h>
 #include <LibWeb/HTML/Window.h>
+#include <LibWeb/Layout/ReplacedBox.h>
 #include <LibWeb/Layout/TextNode.h>
 #include <LibWeb/Layout/TextOffsetMapping.h>
 #include <LibWeb/Layout/Viewport.h>
@@ -61,7 +62,7 @@ static BlockingWheelEventRegionState collect_root_blocking_wheel_event_regions(D
             };
         }
     }
-    return {};
+    return { };
 }
 
 void ViewportPaintable::initialize_async_scrolling_metadata_recording(DisplayListRecordingContext& context)
@@ -91,7 +92,7 @@ void ViewportPaintable::reset_for_relayout()
 {
     PaintableWithLines::reset_for_relayout();
     m_scroll_state.clear();
-    m_scroll_state_snapshot = {};
+    m_scroll_state_snapshot = { };
     m_needs_to_refresh_scroll_state = true;
     m_paintable_boxes_with_auto_content_visibility.clear();
     m_visual_context_tree.clear();
@@ -118,6 +119,8 @@ void ViewportPaintable::build_stacking_context_tree()
             parent_context->m_positioned_descendants_and_stacking_contexts_with_stack_level_0.append(paintable_box);
         if (!paintable_box.is_positioned() && paintable_box.is_floating())
             parent_context->m_non_positioned_floating_descendants.append(paintable_box);
+        if (!establishes_stacking_context && (paintable_box.is_inline() || is<Layout::ReplacedBox>(paintable_box.layout_node())))
+            parent_context->m_contains_inline_or_replaced_descendants = true;
         if (!establishes_stacking_context) {
             VERIFY(!paintable_box.stacking_context());
             return TraversalDecision::Continue;
@@ -153,7 +156,7 @@ void ViewportPaintable::assign_scroll_frames()
         CSSPixelRect containing_block_region;
         bool needs_parent_offset_adjustment = false;
         if (containing_block_of_sticky == scroll_ancestor_paintable_ref) {
-            containing_block_region = { {}, containing_block_of_sticky->scrollable_overflow_rect()->size() };
+            containing_block_region = { { }, containing_block_of_sticky->scrollable_overflow_rect()->size() };
         } else {
             containing_block_region = containing_block_of_sticky->absolute_border_box_rect()
                                           .translated(-scroll_ancestor_paintable.absolute_rect().top_left());

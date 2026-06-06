@@ -86,8 +86,8 @@ public:
     WebIDL::ExceptionOr<void> set_value(Utf16String const&);
 
     // https://html.spec.whatwg.org/multipage/form-control-infrastructure.html#concept-textarea/input-relevant-value
-    virtual Utf16String relevant_value() const override { return value(); }
-    WebIDL::ExceptionOr<void> set_relevant_value(Utf16String const& value) override { return set_value(value); }
+    virtual Utf16String relevant_value() const override;
+    WebIDL::ExceptionOr<void> set_relevant_value(Utf16String const& value) override;
     virtual Optional<Utf16String> selected_text_for_stringifier() const override;
 
     virtual void set_dirty_value_flag(bool flag) override { m_dirty_value = flag; }
@@ -334,7 +334,7 @@ private:
     void handle_maxlength_attribute();
     WebIDL::ExceptionOr<void> handle_src_attribute(String const& value);
 
-    void user_interaction_did_change_input_value(FlyString const& input_type = {}, Optional<Utf16String> const& data = {});
+    void user_interaction_did_change_input_value(FlyString const& input_type = { }, Optional<Utf16String> const& data = { });
 
     // https://html.spec.whatwg.org/multipage/input.html#value-sanitization-algorithm
     Utf16String value_sanitization_algorithm(Utf16String const&) const;

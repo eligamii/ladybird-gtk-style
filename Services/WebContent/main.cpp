@@ -127,14 +127,14 @@ ErrorOr<int> ladybird_main(Main::Arguments arguments)
         return -1;
     }
 
-    Core::EventLoop event_loop;
+    auto& event_loop = Core::EventLoop::initialize_for_current_thread();
 
     WebView::platform_init();
 
     Web::Platform::EventLoopPlugin::install(*new Web::Platform::EventLoopPlugin);
 
     auto config_path = ByteString::formatted("{}/ladybird/default-config", WebView::s_ladybird_resource_root);
-    StringView mach_server_name {};
+    StringView mach_server_name { };
     Vector<ByteString> certificates;
     bool enable_test_mode = false;
     bool expose_experimental_interfaces = false;
@@ -150,9 +150,9 @@ ErrorOr<int> ladybird_main(Main::Arguments arguments)
     bool is_headless = false;
     bool disable_scrollbar_painting = false;
     bool disable_async_scrolling = false;
-    StringView echo_server_port_string_view {};
-    StringView default_time_zone {};
-    StringView style_invalidation_counter_dump_interval {};
+    StringView echo_server_port_string_view { };
+    StringView default_time_zone { };
+    StringView style_invalidation_counter_dump_interval { };
     bool file_origins_are_tuple_origins = false;
 
     Core::ArgsParser args_parser;
@@ -299,7 +299,7 @@ static ErrorOr<void> load_content_blockers(StringView config_path)
     auto& content_blocker = Web::ContentBlocker::the();
     TRY(content_blocker.set_patterns(patterns));
 
-    return {};
+    return { };
 }
 
 ErrorOr<void> connect_to_resource_loader(GC::Heap& heap, IPC::TransportHandle const& handle)
@@ -314,7 +314,7 @@ ErrorOr<void> connect_to_resource_loader(GC::Heap& heap, IPC::TransportHandle co
         Web::ResourceLoader::the().set_client(move(request_client));
     else
         Web::ResourceLoader::initialize(heap, move(request_client));
-    return {};
+    return { };
 }
 
 ErrorOr<void> connect_to_image_decoder(IPC::TransportHandle const& handle)
@@ -329,5 +329,5 @@ ErrorOr<void> connect_to_image_decoder(IPC::TransportHandle const& handle)
         static_cast<WebView::ImageCodecPlugin&>(Web::Platform::ImageCodecPlugin::the()).set_client(move(new_client));
     else
         Web::Platform::ImageCodecPlugin::install(*new WebView::ImageCodecPlugin(move(new_client)));
-    return {};
+    return { };
 }

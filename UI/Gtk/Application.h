@@ -25,6 +25,7 @@ public:
     virtual ~Application() override;
 
     BrowserWindow& new_window(Vector<URL::URL> const& initial_urls);
+    BrowserWindow& new_empty_window();
     void remove_window(BrowserWindow&);
 
     BrowserWindow* active_window() const { return m_active_window; }
@@ -44,7 +45,7 @@ public:
 private:
     explicit Application();
 
-    virtual NonnullOwnPtr<Core::EventLoop> create_platform_event_loop() override;
+    virtual Core::EventLoop& create_platform_event_loop() override;
 
     virtual Optional<WebView::ViewImplementation&> active_web_view() const override;
     virtual Optional<WebView::ViewImplementation&> open_blank_new_tab(Web::HTML::ActivateTab) const override;

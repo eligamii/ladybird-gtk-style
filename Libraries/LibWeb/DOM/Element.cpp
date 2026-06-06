@@ -216,12 +216,12 @@ Optional<String> Element::get_attribute(FlyString const& name) const
 {
     // 1. Let attr be the result of getting an attribute given qualifiedName and this.
     if (!m_attributes)
-        return {};
+        return { };
     auto const* attribute = m_attributes->get_attribute(name);
 
     // 2. If attr is null, return null.
     if (!attribute)
-        return {};
+        return { };
 
     // 3. Return attr’s value.
     return attribute->value();
@@ -232,12 +232,12 @@ Optional<String> Element::get_attribute_ns(Optional<FlyString> const& namespace_
 {
     // 1. Let attr be the result of getting an attribute given namespace, localName, and this.
     if (!m_attributes)
-        return {};
+        return { };
     auto const* attribute = m_attributes->get_attribute_ns(namespace_, name);
 
     // 2. If attr is null, return null.
     if (!attribute)
-        return {};
+        return { };
 
     // 3. Return attr’s value.
     return attribute->value();
@@ -248,12 +248,12 @@ String Element::get_attribute_value(FlyString const& local_name, Optional<FlyStr
 {
     // 1. Let attr be the result of getting an attribute given namespace, localName, and element.
     if (!m_attributes)
-        return {};
+        return { };
     auto const* attribute = m_attributes->get_attribute_ns(namespace_, local_name);
 
     // 2. If attr is null, then return the empty string.
     if (!attribute)
-        return String {};
+        return String { };
 
     // 3. Return attr’s value.
     return attribute->value();
@@ -282,7 +282,7 @@ String Element::get_an_elements_target(Optional<String> target) const
         target = "_blank"_string;
 
     // 3. Return target.
-    return target.value_or({});
+    return target.value_or({ });
 }
 
 // https://html.spec.whatwg.org/multipage/links.html#get-an-element's-noopener
@@ -372,7 +372,7 @@ void Element::follow_the_hyperlink(Optional<String> hyperlink_suffix, HTML::User
         url_string = MUST(String::formatted("{}{}", url_string, *hyperlink_suffix));
 
     // 11. Let referrerPolicy be the current state of subject's referrerpolicy content attribute.
-    auto referrer_policy = ReferrerPolicy::from_string(attribute(HTML::AttributeNames::referrerpolicy).value_or({})).value_or(ReferrerPolicy::ReferrerPolicy::EmptyString);
+    auto referrer_policy = ReferrerPolicy::from_string(attribute(HTML::AttributeNames::referrerpolicy).value_or({ })).value_or(ReferrerPolicy::ReferrerPolicy::EmptyString);
 
     // FIXME: 12. If subject's link types includes the noreferrer keyword, then set referrerPolicy to "no-referrer".
 
@@ -387,7 +387,7 @@ GC::Ptr<Attr> Element::get_attribute_node(FlyString const& name) const
 {
     // The getAttributeNode(qualifiedName) method steps are to return the result of getting an attribute given qualifiedName and this.
     if (!m_attributes)
-        return {};
+        return { };
     return m_attributes->get_attribute(name);
 }
 
@@ -396,7 +396,7 @@ GC::Ptr<Attr> Element::get_attribute_node_ns(Optional<FlyString> const& namespac
 {
     // The getAttributeNodeNS(namespace, localName) method steps are to return the result of getting an attribute given namespace, localName, and this.
     if (!m_attributes)
-        return {};
+        return { };
     return m_attributes->get_attribute_ns(namespace_, name);
 }
 
@@ -414,7 +414,7 @@ WebIDL::ExceptionOr<void> Element::set_attribute_for_bindings(FlyString qualifie
 
     // 3. Let verifiedValue be the result of calling get Trusted Types-compliant attribute value
     //    with qualifiedName, null, this, and value.
-    auto const verified_value = TRY(TrustedTypes::get_trusted_types_compliant_attribute_value(qualified_name, {}, *this, value));
+    auto const verified_value = TRY(TrustedTypes::get_trusted_types_compliant_attribute_value(qualified_name, { }, *this, value));
 
     // 4. Let attribute be the first attribute in this’s attribute list whose qualified name is qualifiedName, and null otherwise.
     auto* attribute = attributes()->get_attribute(qualified_name);
@@ -422,7 +422,7 @@ WebIDL::ExceptionOr<void> Element::set_attribute_for_bindings(FlyString qualifie
     // 5. If attribute is non-null, then change attribute to verifiedValue and return.
     if (attribute) {
         attribute->change_attribute(verified_value.to_utf8_but_should_be_ported_to_utf16());
-        return {};
+        return { };
     }
 
     // 6. Set attribute to a new attribute whose local name is qualifiedName, value is verifiedValue,
@@ -432,7 +432,7 @@ WebIDL::ExceptionOr<void> Element::set_attribute_for_bindings(FlyString qualifie
     // 7. Append attribute to this.
     m_attributes->append_attribute(*attribute);
 
-    return {};
+    return { };
 }
 
 // https://dom.spec.whatwg.org/#dom-element-setattribute
@@ -500,10 +500,10 @@ WebIDL::ExceptionOr<QualifiedName> validate_and_extract(JS::Realm& realm, Option
 
     // 1. If namespace is the empty string, then set it to null.
     if (namespace_.has_value() && namespace_.value().is_empty())
-        namespace_ = {};
+        namespace_ = { };
 
     // 2. Let prefix be null.
-    Optional<FlyString> prefix = {};
+    Optional<FlyString> prefix = { };
 
     // 3. Let localName be qualifiedName.
     auto local_name = qualified_name;
@@ -571,7 +571,7 @@ WebIDL::ExceptionOr<void> Element::set_attribute_ns_for_bindings(Optional<FlyStr
     // 3. Set an attribute value for this using localName, verifiedValue, and also prefix and namespace.
     set_attribute_value(extracted_qualified_name.local_name(), verified_value.to_utf8_but_should_be_ported_to_utf16(), extracted_qualified_name.prefix(), extracted_qualified_name.namespace_());
 
-    return {};
+    return { };
 }
 
 // https://dom.spec.whatwg.org/#concept-element-attributes-append
@@ -662,8 +662,8 @@ bool Element::has_attribute_ns(Optional<FlyString> const& namespace_, FlyString 
 
     // 1. If namespace is the empty string, then set it to null.
     // 2. Return true if this has an attribute whose namespace is namespace and local name is localName; otherwise false.
-    if (namespace_ == FlyString {})
-        return m_attributes->get_attribute_ns(OptionalNone {}, name) != nullptr;
+    if (namespace_ == FlyString { })
+        return m_attributes->get_attribute_ns(OptionalNone { }, name) != nullptr;
 
     return m_attributes->get_attribute_ns(namespace_, name) != nullptr;
 }
@@ -686,7 +686,7 @@ WebIDL::ExceptionOr<bool> Element::toggle_attribute(FlyString const& name, Optio
         // 1. If force is not given or is true, create an attribute whose local name is qualifiedName, value is the empty
         //    string, and node document is this’s node document, then append this attribute to this, and then return true.
         if (!force.has_value() || force.value()) {
-            auto new_attribute = Attr::create(document(), insert_as_lowercase ? name.to_ascii_lowercase() : name.to_string(), String {});
+            auto new_attribute = Attr::create(document(), insert_as_lowercase ? name.to_ascii_lowercase() : name.to_string(), String { });
             m_attributes->append_attribute(new_attribute);
 
             return true;
@@ -711,7 +711,7 @@ Vector<String> Element::get_attribute_names() const
 {
     // The getAttributeNames() method steps are to return the qualified names of the attributes in this’s attribute list, in order; otherwise a new list.
     if (!m_attributes)
-        return {};
+        return { };
     Vector<String> names;
     for (size_t i = 0; i < m_attributes->length(); ++i) {
         auto const* attribute = m_attributes->item(i);
@@ -737,7 +737,7 @@ GC::Ptr<DOM::Element> Element::get_the_attribute_associated_element(FlyString co
             return *explicitly_set_attribute_element;
 
         // 2. Return null.
-        return {};
+        return { };
     }
 
     // 4. Otherwise, if contentAttributeValue is not null, return the first element candidate, in tree order, that meets
@@ -750,7 +750,7 @@ GC::Ptr<DOM::Element> Element::get_the_attribute_associated_element(FlyString co
 
     // 5. If no such element exists, then return null.
     // 6. Return null.
-    return {};
+    return { };
 }
 
 // https://html.spec.whatwg.org/multipage/common-dom-interfaces.html#attr-associated-elements
@@ -781,7 +781,7 @@ Optional<GC::RootVector<GC::Ref<DOM::Element>>> Element::get_the_attribute_assoc
 
         // 2. If contentAttributeValue is null, then return null.
         if (!content_attribute_value.has_value())
-            return {};
+            return { };
 
         // 3. Let tokens be contentAttributeValue, split on ASCII whitespace.
         auto tokens = content_attribute_value->bytes_as_string_view().split_view_if(Infra::is_ascii_whitespace);
@@ -819,7 +819,7 @@ GC::Ptr<Layout::Node> Element::create_layout_node(GC::Ref<CSS::ComputedPropertie
 GC::Ptr<Layout::NodeWithStyle> Element::create_layout_node_for_display_type(DOM::Document& document, CSS::Display const& display, GC::Ref<CSS::ComputedProperties> style, Element* element)
 {
     if (display.is_none())
-        return {};
+        return { };
 
     if (display.is_table_inside() || display.is_table_row_group() || display.is_table_header_group() || display.is_table_footer_group() || display.is_table_row())
         return document.heap().allocate<Layout::Box>(document, element, move(style));
@@ -1102,7 +1102,7 @@ CSS::RequiredInvalidationAfterStyleChange Element::recompute_style(bool& did_cha
     auto old_non_animated_display_is_none = m_computed_properties ? m_computed_properties->property(CSS::PropertyID::Display, CSS::ComputedProperties::WithAnimationsApplied::No).as_display().display().is_none() : true;
     auto new_non_animated_display_is_none = new_computed_properties->property(CSS::PropertyID::Display, CSS::ComputedProperties::WithAnimationsApplied::No).as_display().display().is_none();
 
-    set_computed_properties({}, move(new_computed_properties));
+    set_computed_properties({ }, move(new_computed_properties));
 
     if (old_non_animated_display_is_none != new_non_animated_display_is_none) {
         for_each_shadow_including_inclusive_descendant([&](auto& node) {
@@ -1272,7 +1272,7 @@ WebIDL::ExceptionOr<void> Element::attach_a_shadow_root(Bindings::ShadowRootMode
         current_shadow_root->set_declarative(false);
 
         //    3. Return.
-        return {};
+        return { };
     }
 
     // 5. Let shadow be a new shadow root whose node document is element’s node document, host is this, and mode is
@@ -1304,7 +1304,7 @@ WebIDL::ExceptionOr<void> Element::attach_a_shadow_root(Bindings::ShadowRootMode
 
     // 13. Set element’s shadow root to shadow.
     set_shadow_root(shadow);
-    return {};
+    return { };
 }
 
 // https://dom.spec.whatwg.org/#dom-element-attachshadow
@@ -1433,7 +1433,7 @@ WebIDL::ExceptionOr<void> Element::set_inner_html(TrustedTypes::TrustedHTMLOrStr
         }
     }
 
-    return {};
+    return { };
 }
 
 // https://html.spec.whatwg.org/multipage/dynamic-markup-insertion.html#dom-element-innerhtml
@@ -1494,6 +1494,10 @@ void Element::set_shadow_root(GC::Ptr<ShadowRoot> shadow_root)
     }
     m_shadow_root = move(shadow_root);
     if (m_shadow_root) {
+        // NB: Children shouldn't be set on shadow roots until the shadow root is attached to a host so that they
+        //     correctly inherit connectedness.
+        VERIFY(!m_shadow_root->has_children());
+
         m_shadow_root->set_host(this);
         m_shadow_root->set_is_connected(is_connected());
     }
@@ -1504,7 +1508,7 @@ void Element::set_shadow_root(GC::Ptr<ShadowRoot> shadow_root)
 GC::Ref<CSS::CSSStyleProperties> Element::style_for_bindings()
 {
     if (!m_inline_style)
-        m_inline_style = CSS::CSSStyleProperties::create_element_inline_style({ *this }, {}, {});
+        m_inline_style = CSS::CSSStyleProperties::create_element_inline_style({ *this }, { }, { });
     return *m_inline_style;
 }
 
@@ -1609,7 +1613,7 @@ static Vector<CSSPixelRect> compute_client_rects_assuming_layout_clean(Element c
     // 1. If the element on which it was invoked does not have an associated layout box return an empty DOMRectList
     //    object and stop this algorithm.
     if (!element.layout_node())
-        return {};
+        return { };
 
     // FIXME: 2. If the element has an associated SVG layout box return a DOMRectList object containing a single
     //          DOMRect object that describes the bounding box of the element as defined by the SVG specification,
@@ -1639,13 +1643,13 @@ Vector<CSSPixelRect> Element::get_client_rects() const
 {
     auto navigable = document().navigable();
     if (!navigable)
-        return {};
+        return { };
 
     // NOTE: Ensure that layout is up-to-date before looking at metrics.
     const_cast<Document&>(document()).update_layout_if_needed_for_node(*this, UpdateLayoutReason::ElementGetClientRects);
 
     if (!layout_node())
-        return {};
+        return { };
 
     // NOTE: Make sure CSS transforms are resolved before they are used to calculate the rect position.
     const_cast<Document&>(document()).update_paint_and_hit_testing_properties_if_needed();
@@ -1656,7 +1660,7 @@ Vector<CSSPixelRect> Element::get_client_rects() const
 Vector<CSSPixelRect> Element::client_rects_assuming_layout_clean() const
 {
     if (!document().navigable())
-        return {};
+        return { };
     return compute_client_rects_assuming_layout_clean(*this);
 }
 
@@ -1775,9 +1779,9 @@ void Element::inserted()
 
     if (is_connected()) {
         if (m_id.has_value())
-            document().element_with_id_was_added({}, *this);
+            document().element_with_id_was_added({ }, *this);
         if (m_name.has_value())
-            document().element_with_name_was_added({}, *this);
+            document().element_with_name_was_added({ }, *this);
         if (m_id.has_value() || !m_classes.is_empty())
             invalidate_content_blocker_style_if_needed(*this);
     }
@@ -1799,9 +1803,9 @@ void Element::removed_from(IsSubtreeRoot is_subtree_root, Node* old_ancestor, No
 
     if (old_root.is_connected()) {
         if (m_id.has_value())
-            document().element_with_id_was_removed({}, *this);
+            document().element_with_id_was_removed({ }, *this);
         if (m_name.has_value())
-            document().element_with_name_was_removed({}, *this);
+            document().element_with_name_was_removed({ }, *this);
         if (m_computed_properties) {
             auto& anchor_names = is<ShadowRoot>(old_root)
                 ? as<ShadowRoot>(old_root).anchor_name_map()
@@ -2541,7 +2545,7 @@ WebIDL::ExceptionOr<void> Element::set_outer_html(TrustedTypes::TrustedHTMLOrStr
 
     // 3. If parent is null, return. There would be no way to obtain a reference to the nodes created even if the remaining steps were run.
     if (!parent)
-        return {};
+        return { };
 
     // 4. If parent is a Document, throw a "NoModificationAllowedError" DOMException.
     if (parent->is_document())
@@ -2557,7 +2561,7 @@ WebIDL::ExceptionOr<void> Element::set_outer_html(TrustedTypes::TrustedHTMLOrStr
     // 6. Replace this with fragment within this's parent.
     TRY(parent->replace_child(fragment, *this));
 
-    return {};
+    return { };
 }
 
 // https://html.spec.whatwg.org/multipage/dynamic-markup-insertion.html#the-insertadjacenthtml()-method
@@ -2640,7 +2644,7 @@ WebIDL::ExceptionOr<void> Element::insert_adjacent_html(String const& position, 
         // Insert fragment into this's parent before this's next sibling.
         parent()->insert_before(fragment, next_sibling());
     }
-    return {};
+    return { };
 }
 
 // https://fullscreen.spec.whatwg.org/#dom-element-requestfullscreen
@@ -2842,7 +2846,7 @@ WebIDL::ExceptionOr<void> Element::insert_adjacent_text(String const& where, Utf
     // 2. Run insert adjacent, given this, where, and text.
     // Spec Note: This method returns nothing because it existed before we had a chance to design it.
     (void)TRY(insert_adjacent(where, text));
-    return {};
+    return { };
 }
 
 // https://drafts.csswg.org/cssom-view-1/#determine-the-scroll-into-view-position
@@ -2856,13 +2860,13 @@ static CSSPixelPoint determine_the_scroll_into_view_position(Element& target, Bi
     CSSPixelPoint current_scroll_position;
     if (scrolling_box.is_document()) {
         // NOTE: Element::getBoundingClientRect() returns coordinates relative to the viewport.
-        scrolling_box_rect = { {}, scrolling_box.document().viewport_rect().size() };
+        scrolling_box_rect = { { }, scrolling_box.document().viewport_rect().size() };
         current_scroll_position = scrolling_box.document().navigable()->viewport_scroll_offset();
     } else if (auto paintable_box = scrolling_box.paintable_box()) {
         current_scroll_position = paintable_box->scroll_offset();
         scrolling_box_rect = paintable_box->absolute_rect();
     } else {
-        return {};
+        return { };
     }
 
     // FIXME: All of this needs to support different block/inline directions.
@@ -3366,7 +3370,7 @@ void Element::enqueue_a_custom_element_callback_reaction(FlyString const& callba
             if (connected_callback)
                 (void)WebIDL::invoke_callback(*connected_callback, this, WebIDL::ExceptionBehavior::Report, no_arguments);
 
-            return JS::js_undefined(); }, 0, Utf16FlyString {}, &realm());
+            return JS::js_undefined(); }, 0, Utf16FlyString { }, &realm());
         callback = realm().heap().allocate<WebIDL::CallbackType>(steps, realm());
     }
 
@@ -3402,7 +3406,7 @@ JS::ThrowCompletionOr<void> Element::upgrade_element(GC::Ref<HTML::CustomElement
 
     // 1. If element's custom element state is not "undefined" or "uncustomized", then return.
     if (m_custom_element_state != CustomElementState::Undefined && m_custom_element_state != CustomElementState::Uncustomized)
-        return {};
+        return { };
 
     // 2. Set element's custom element definition to definition.
     m_custom_element_definition = custom_element_definition;
@@ -3456,13 +3460,13 @@ JS::ThrowCompletionOr<void> Element::upgrade_element(GC::Ref<HTML::CustomElement
         set_custom_element_state(CustomElementState::Precustomized);
 
         // 3. Let constructResult be the result of constructing C, with no arguments.
-        auto construct_result = TRY(WebIDL::construct(constructor, {}));
+        auto construct_result = TRY(WebIDL::construct(constructor, { }));
 
         // 4. If SameValue(constructResult, element) is false, then throw a TypeError.
         if (!JS::same_value(construct_result, this))
             return vm.throw_completion<JS::TypeError>("Constructing the custom element returned a different element from the custom element"sv);
 
-        return {};
+        return { };
     };
 
     auto maybe_exception = attempt_to_construct_custom_element();
@@ -3501,7 +3505,7 @@ JS::ThrowCompletionOr<void> Element::upgrade_element(GC::Ref<HTML::CustomElement
     // 11. Set element's custom element state to "custom".
     set_custom_element_state(CustomElementState::Custom);
 
-    return {};
+    return { };
 }
 
 // https://html.spec.whatwg.org/multipage/custom-elements.html#concept-try-upgrade
@@ -3578,7 +3582,7 @@ Optional<String> Element::locate_a_namespace_prefix(Optional<String> const& name
         return parent->locate_a_namespace_prefix(namespace_);
 
     // 4. Return null
-    return {};
+    return { };
 }
 
 void Element::for_each_attribute(Function<void(Attr&)> callback)
@@ -3639,7 +3643,7 @@ GC::Ptr<CSS::ComputedProperties> Element::computed_properties(Optional<CSS::Pseu
     if (pseudo_element_type.has_value()) {
         if (auto pseudo_element = get_pseudo_element(*pseudo_element_type); pseudo_element.has_value())
             return pseudo_element->computed_properties();
-        return {};
+        return { };
     }
     return m_computed_properties;
 }
@@ -3649,7 +3653,7 @@ GC::Ptr<CSS::ComputedProperties const> Element::computed_properties(Optional<CSS
     if (pseudo_element_type.has_value()) {
         if (auto pseudo_element = get_pseudo_element(*pseudo_element_type); pseudo_element.has_value())
             return pseudo_element->computed_properties();
-        return {};
+        return { };
     }
     return m_computed_properties;
 }
@@ -3662,7 +3666,7 @@ void Element::set_computed_properties(Optional<CSS::PseudoElement> pseudo_elemen
         if (style)
             ensure_synthetic_pseudo_element(*pseudo_element_type).set_computed_properties(style);
         else if (auto existing_pseudo_element = get_synthetic_pseudo_element(*pseudo_element_type); existing_pseudo_element.has_value())
-            existing_pseudo_element->set_computed_properties({});
+            existing_pseudo_element->set_computed_properties({ });
         return;
     }
     m_computed_properties = style;
@@ -3691,7 +3695,7 @@ Optional<SyntheticPseudoElement&> Element::get_synthetic_pseudo_element(CSS::Pse
     auto pseudo_element = get_pseudo_element(type);
 
     if (!pseudo_element.has_value())
-        return {};
+        return { };
 
     return as<SyntheticPseudoElement>(pseudo_element.value());
 }
@@ -3699,15 +3703,15 @@ Optional<SyntheticPseudoElement&> Element::get_synthetic_pseudo_element(CSS::Pse
 Optional<PseudoElement&> Element::get_pseudo_element(CSS::PseudoElement type) const
 {
     if (!m_pseudo_element_data)
-        return {};
+        return { };
 
     if (!CSS::Selector::PseudoElementSelector::is_known_pseudo_element_type(type)) {
-        return {};
+        return { };
     }
 
     auto pseudo_element = m_pseudo_element_data->get(type);
     if (!pseudo_element.has_value())
-        return {};
+        return { };
 
     return *(pseudo_element.value());
 }
@@ -3776,7 +3780,7 @@ void Element::set_custom_property_data(Optional<CSS::PseudoElement> pseudo_eleme
         }
 
     } else if (auto existing_pseudo_element = get_pseudo_element(pseudo_element.value()); existing_pseudo_element.has_value())
-        existing_pseudo_element->set_custom_property_data({});
+        existing_pseudo_element->set_custom_property_data({ });
 }
 
 RefPtr<CSS::CustomPropertyData const> Element::custom_property_data(Optional<CSS::PseudoElement> pseudo_element) const
@@ -3796,8 +3800,8 @@ RefPtr<CSS::CustomPropertyData const> Element::custom_property_data(Optional<CSS
 bool Element::refresh_inherited_custom_property_data()
 {
     RefPtr<CSS::CustomPropertyData const> parent_data;
-    if (auto inherit_from = element_to_inherit_style_from({})) {
-        if (auto data = inherit_from->custom_property_data({}))
+    if (auto inherit_from = element_to_inherit_style_from({ })) {
+        if (auto data = inherit_from->custom_property_data({ }))
             parent_data = data->inheritable(document());
     }
 
@@ -3845,7 +3849,7 @@ GC::Ref<WebIDL::Promise> Element::scroll(double x, double y)
     //               as the element is not eligible to be the Document.scrollingElement.
     if (x == 0
         && y == 0
-        && scroll_offset({}).is_zero()
+        && scroll_offset({ }).is_zero()
         && this != document.body()
         && this != document.document_element()) {
         return WebIDL::create_resolved_promise(realm(), JS::js_undefined());
@@ -4136,7 +4140,7 @@ void Element::maybe_invalidate_ordinals_for_list_owner(Optional<Element*> skip_n
             if (skip_node.has_value() && item == skip_node.value())
                 return IterationDecision::Continue;
 
-            item->m_ordinal_value = {};
+            item->m_ordinal_value = { };
 
             // Invalidate just the first ordinal in the list of numbered items.
             // NOTE: This works since this item is the first accessed (preorder) when rendering the list.
@@ -4225,7 +4229,7 @@ CSSPixelPoint Element::scroll_offset(Optional<CSS::PseudoElement> pseudo_element
     if (pseudo_element_type.has_value()) {
         if (auto pseudo_element = get_synthetic_pseudo_element(*pseudo_element_type); pseudo_element.has_value())
             return pseudo_element->scroll_offset();
-        return {};
+        return { };
     }
     return m_scroll_offset;
 }
@@ -4360,7 +4364,7 @@ Optional<Element::Directionality> Element::auto_directionality() const
             return Directionality::Ltr;
 
         // 3. Return null.
-        return {};
+        return { };
     }
 
     // 2. If element is a slot element whose root is a shadow root and element's assigned nodes are not empty:
@@ -4391,7 +4395,7 @@ Optional<Element::Directionality> Element::auto_directionality() const
             }
 
             // 2. Return null.
-            return {};
+            return { };
         }
     }
 
@@ -4459,7 +4463,7 @@ Optional<Element::Directionality> Element::contained_text_auto_directionality(bo
         return result;
 
     // 2. Return null.
-    return {};
+    return { };
 }
 
 // https://html.spec.whatwg.org/multipage/dom.html#parent-directionality
@@ -4514,16 +4518,16 @@ void Element::attribute_changed(FlyString const& local_name, Optional<String> co
             return;
 
         // 2. If value is null and oldValue is the empty string, then return.
-        if (!value.has_value() && old_value == String {})
+        if (!value.has_value() && old_value == String { })
             return;
 
         // 3. If value is the empty string and oldValue is null, then return.
-        if (value == String {} && !old_value.has_value())
+        if (value == String { } && !old_value.has_value())
             return;
 
         // 4. If value is null or the empty string, then set element’s name to the empty string.
         if (!value.has_value() || value->is_empty())
-            set_slottable_name({});
+            set_slottable_name({ });
         // 5. Otherwise, set element’s name to value.
         else
             set_slottable_name(*value);
@@ -4537,11 +4541,11 @@ void Element::attribute_changed(FlyString const& local_name, Optional<String> co
         return;
     }
 
-    auto value_or_empty = value.value_or(String {});
+    auto value_or_empty = value.value_or(String { });
 
     if (local_name == HTML::AttributeNames::id) {
         if (value_or_empty.is_empty())
-            m_id = {};
+            m_id = { };
         else
             m_id = value_or_empty;
 
@@ -4549,16 +4553,16 @@ void Element::attribute_changed(FlyString const& local_name, Optional<String> co
             Optional<FlyString> old_value_fly_string;
             if (old_value.has_value())
                 old_value_fly_string = *old_value;
-            document().element_id_changed({}, *this, old_value_fly_string);
+            document().element_id_changed({ }, *this, old_value_fly_string);
         }
     } else if (local_name == HTML::AttributeNames::name) {
         if (value_or_empty.is_empty())
-            m_name = {};
+            m_name = { };
         else
             m_name = value_or_empty;
 
         if (is_connected())
-            document().element_name_changed({}, *this);
+            document().element_name_changed({ }, *this);
     } else if (local_name == HTML::AttributeNames::class_) {
         if (value_or_empty.is_empty()) {
             m_classes.clear();
@@ -4577,7 +4581,7 @@ void Element::attribute_changed(FlyString const& local_name, Optional<String> co
         if (m_inline_style && m_inline_style->is_updating())
             return;
         if (!m_inline_style)
-            m_inline_style = CSS::CSSStyleProperties::create_element_inline_style({ *this }, {}, {});
+            m_inline_style = CSS::CSSStyleProperties::create_element_inline_style({ *this }, { }, { });
         m_inline_style->set_declarations_from_text(value.value_or(""_string));
         prefetch_inline_style_image_resources(*m_inline_style, document());
         set_needs_style_update(true);
@@ -4592,7 +4596,7 @@ void Element::attribute_changed(FlyString const& local_name, Optional<String> co
             else if (value_or_empty.equals_ignoring_ascii_case("auto"sv))
                 m_dir = Dir::Auto;
             else
-                m_dir = {};
+                m_dir = { };
         }
         if (is_dir)
             CSS::Invalidation::invalidate_style_after_directionality_change(*this);
@@ -4620,7 +4624,7 @@ void Element::attribute_changed(FlyString const& local_name, Optional<String> co
 #define __ENUMERATE_ARIA_ATTRIBUTE(attribute, referencing_attribute)    \
     else if (local_name == ARIA::AttributeNames::referencing_attribute) \
     {                                                                   \
-        set_##attribute({});                                            \
+        set_##attribute({ });                                           \
     }
     ENUMERATE_ARIA_ELEMENT_REFERENCING_ATTRIBUTES
 #undef __ENUMERATE_ARIA_ATTRIBUTE
@@ -4631,7 +4635,7 @@ void Element::attribute_changed(FlyString const& local_name, Optional<String> co
 #define __ENUMERATE_ARIA_ATTRIBUTE(attribute, referencing_attribute)    \
     else if (local_name == ARIA::AttributeNames::referencing_attribute) \
     {                                                                   \
-        set_##attribute({});                                            \
+        set_##attribute({ });                                           \
     }
     ENUMERATE_ARIA_ELEMENT_LIST_REFERENCING_ATTRIBUTES
 #undef __ENUMERATE_ARIA_ATTRIBUTE
@@ -4700,13 +4704,13 @@ WebIDL::ExceptionOr<void> Element::set_html_unsafe(TrustedTypes::TrustedHTMLOrSt
     // 3. Unsafe set HTML given target, this, and compliantHTML.
     TRY(target->unsafely_set_html(*this, compliant_html.to_utf8_but_should_be_ported_to_utf16()));
 
-    return {};
+    return { };
 }
 
 Optional<CSS::CountersSet const&> Element::counters_set() const
 {
     if (!m_counters_set)
-        return {};
+        return { };
     return *m_counters_set;
 }
 
@@ -4743,29 +4747,29 @@ Optional<String> Element::lang() const
         // 3. If the node's parent is a shadow root
         //      Use the language of that shadow root's host.
         if (auto* parent = this->parent(); parent && parent->is_shadow_root())
-            return static_cast<ShadowRoot const&>(*parent).host()->lang().value_or({});
+            return static_cast<ShadowRoot const&>(*parent).host()->lang().value_or({ });
 
         // 4. If the node's parent element is not null
         //      Use the language of that parent element.
         if (auto parent = parent_element())
-            return parent->lang().value_or({});
+            return parent->lang().value_or({ });
 
         // 5. Otherwise
         //      - If there is a pragma-set default language set, then that is the language of the node.
         if (document().pragma_set_default_language().has_value()) {
-            return document().pragma_set_default_language().value_or({});
+            return document().pragma_set_default_language().value_or({ });
         }
 
         //      - If there is no pragma-set default language set, then language information from a higher-level protocol (such as HTTP),
         if (document().http_content_language().has_value()) {
-            return document().http_content_language().value_or({});
+            return document().http_content_language().value_or({ });
         }
 
         //        if any, must be used as the final fallback language instead.
         //      - In the absence of any such language information, and in cases where the higher-level protocol reports multiple languages,
         //        the language of the node is unknown, and the corresponding language tag is the empty string.
         // Default locale sounds like a reasonable fallback here.
-        return {};
+        return { };
     };
 
     if (!m_lang_value.has_value())
@@ -4773,7 +4777,7 @@ Optional<String> Element::lang() const
 
     // If the resulting value is the empty string, then it must be interpreted as meaning that the language of the node is explicitly unknown.
     if (m_lang_value->is_empty())
-        return {};
+        return { };
 
     return m_lang_value;
 }
@@ -4858,7 +4862,7 @@ Optional<FlyString> Element::document_scoped_view_transition_name()
     }
 
     // 3. Otherwise, return none.
-    return {};
+    return { };
 }
 
 // https://drafts.csswg.org/css-view-transitions-1/#capture-the-image
@@ -4950,7 +4954,7 @@ void Element::play_or_cancel_animations_after_display_property_change()
         }
     };
 
-    play_or_cancel_depending_on_display(*css_defined_animations({}));
+    play_or_cancel_depending_on_display(*css_defined_animations({ }));
 
     for (auto i = 0; i < to_underlying(CSS::PseudoElement::KnownPseudoElementCount); i++) {
         auto pseudo_element = static_cast<CSS::PseudoElement>(i);

@@ -54,7 +54,7 @@ ErrorOr<int> ladybird_main(Main::Arguments arguments)
                 current_request.name = parts[1];
             }
             requests.append(move(current_request));
-            current_request = {};
+            current_request = { };
             return true;
         },
     });
@@ -71,7 +71,7 @@ ErrorOr<int> ladybird_main(Main::Arguments arguments)
         return 1;
     }
 
-    Core::EventLoop loop;
+    auto& loop = Core::EventLoop::initialize_for_current_thread();
 
     DNS::Resolver resolver {
         [&] -> ErrorOr<DNS::Resolver::SocketResult> {

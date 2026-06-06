@@ -78,7 +78,7 @@ public:
         auto const event_type = event->type();
 
 #if defined(AK_OS_WINDOWS)
-        static Optional<NativeWindowsTimeChangeEventFilter> time_change_event_filter {};
+        static Optional<NativeWindowsTimeChangeEventFilter> time_change_event_filter { };
         if (auto time_zone_watcher = application.time_zone_watcher(); !time_change_event_filter.has_value() && time_zone_watcher.has_value()) {
             time_change_event_filter.emplace(time_zone_watcher.value());
             installNativeEventFilter(&time_change_event_filter.value());
@@ -124,17 +124,17 @@ void Application::create_platform_options(WebView::BrowserOptions&, WebView::Req
     web_content_options.config_path = Settings::the()->directory();
 }
 
-NonnullOwnPtr<Core::EventLoop> Application::create_platform_event_loop()
+Core::EventLoop& Application::create_platform_event_loop()
 {
     if (!browser_options().headless_mode.has_value()) {
         Core::EventLoopManager::install(*new EventLoopManagerQt);
         m_application = make<LadybirdQApplication>(arguments());
     }
 
-    auto event_loop = WebView::Application::create_platform_event_loop();
+    auto& event_loop = WebView::Application::create_platform_event_loop();
 
     if (!browser_options().headless_mode.has_value())
-        static_cast<EventLoopImplementationQt&>(event_loop->impl()).set_main_loop();
+        static_cast<EventLoopImplementationQt&>(event_loop.impl()).set_main_loop();
 
     return event_loop;
 }
@@ -166,7 +166,7 @@ Optional<WebView::ViewImplementation&> Application::active_web_view() const
 {
     if (auto* active_tab = this->active_tab())
         return active_tab->view();
-    return {};
+    return { };
 }
 
 Optional<WebView::ViewImplementation&> Application::open_blank_new_tab(Web::HTML::ActivateTab activate_tab) const
@@ -191,7 +191,7 @@ Optional<ByteString> Application::ask_user_for_download_path(StringView file) co
 
     auto path = QFileDialog::getSaveFileName(nullptr, "Select save location", default_path);
     if (path.isNull())
-        return {};
+        return { };
 
     return ak_byte_string_from_qstring(path);
 }
@@ -277,7 +277,7 @@ Vector<Web::Clipboard::SystemClipboardRepresentation> Application::clipboard_ent
 
     auto const* mime_data = clipboard->mimeData();
     if (!mime_data)
-        return {};
+        return { };
 
     for (auto const& format : mime_data->formats()) {
         auto data = ak_byte_string_from_qbytearray(mime_data->data(format));
@@ -346,7 +346,7 @@ Optional<Application::BookmarkID> Application::bookmark_item_id_for_context_menu
         };
     }
 
-    return {};
+    return { };
 }
 
 template<typename PromiseType>
@@ -399,7 +399,7 @@ static NonnullRefPtr<PromiseType> display_add_or_edit_bookmark_dialog(
         promise->resolve(WebView::BookmarkItem::Bookmark {
             .url = url.release_value(),
             .title = move(title),
-            .favicon_base64_png = {},
+            .favicon_base64_png = { },
         });
     });
 
@@ -462,7 +462,7 @@ static NonnullRefPtr<PromiseType> display_add_or_edit_bookmark_folder_dialog(
 
         promise->resolve(WebView::BookmarkItem::Folder {
             .title = move(title),
-            .children = {},
+            .children = { },
         });
     });
 
@@ -472,7 +472,7 @@ static NonnullRefPtr<PromiseType> display_add_or_edit_bookmark_folder_dialog(
 
 NonnullRefPtr<Application::BookmarkFolderPromise> Application::display_add_bookmark_folder_dialog() const
 {
-    return display_add_or_edit_bookmark_folder_dialog<BookmarkFolderPromise>(active_tab(), "Add Folder", {});
+    return display_add_or_edit_bookmark_folder_dialog<BookmarkFolderPromise>(active_tab(), "Add Folder", { });
 }
 
 NonnullRefPtr<Application::BookmarkFolderPromise> Application::display_edit_bookmark_folder_dialog(WebView::BookmarkItem::Folder const& current_folder) const

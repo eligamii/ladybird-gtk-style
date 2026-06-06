@@ -102,7 +102,7 @@ private:
     void replace(PaintPhase phase, ReadonlyBytes replacement_bytes)
     {
         ByteBuffer command_buffer;
-        Array<Span, paint_phase_count> phase_spans {};
+        Array<Span, paint_phase_count> phase_spans { };
 
         for (size_t phase_index = 0; phase_index < paint_phase_count; ++phase_index) {
             if (!m_present_phases[phase_index])
@@ -117,8 +117,8 @@ private:
     }
 
     ByteBuffer m_command_bytes;
-    Array<bool, paint_phase_count> m_present_phases {};
-    Array<Span, paint_phase_count> m_phase_spans {};
+    Array<bool, paint_phase_count> m_present_phases { };
+    Array<Span, paint_phase_count> m_phase_spans { };
 };
 
 static bool content_size_change_affects_container_queries(PaintableBox const& paintable_box, CSSPixelSize old_size, CSSPixelSize new_size)
@@ -180,7 +180,7 @@ static Gfx::FloatRect css_rect_to_device_rect(CSSPixelRect rect, double device_p
 static Optional<float> css_inset_to_device_inset(Optional<CSSPixels> inset, double device_pixels_per_css_pixel)
 {
     if (!inset.has_value())
-        return {};
+        return { };
     return inset->to_float() * static_cast<float>(device_pixels_per_css_pixel);
 }
 
@@ -192,7 +192,7 @@ static Optional<CompositorScrollNodeKind> scroll_node_kind_for(PaintableBox cons
         return CompositorScrollNodeKind::PseudoElement;
     if (paintable_box.dom_node() && is<DOM::Element>(*paintable_box.dom_node()))
         return CompositorScrollNodeKind::Element;
-    return {};
+    return { };
 }
 
 static UniqueNodeID scrollable_node_id_for(PaintableBox const& paintable_box)
@@ -238,12 +238,12 @@ static void record_scroll_node(PaintableBox const& paintable_box, DisplayListRec
     if (!scroll_node_kind.has_value())
         return;
 
-    auto parent_scroll_frame_index = ScrollFrameIndex {};
+    auto parent_scroll_frame_index = ScrollFrameIndex { };
     if (auto scrollable_ancestor = paintable_box.nearest_scrollable_ancestor())
         parent_scroll_frame_index = scrollable_ancestor->own_scroll_frame_index();
 
     auto scrollport_rect = paintable_box.is_viewport_paintable()
-        ? Gfx::IntRect { {}, context.device_viewport_rect().size().to_type<int>() }
+        ? Gfx::IntRect { { }, context.device_viewport_rect().size().to_type<int>() }
         : context.rounded_device_rect(paintable_box.absolute_padding_box_rect()).to_type<int>();
 
     auto& recorder = context.display_list_recorder();
@@ -281,7 +281,7 @@ static Optional<ScrollFrameIndex> wheel_hit_test_target_scroll_frame_index_for(P
         return scrollable_ancestor->own_scroll_frame_index();
     if (auto viewport_paintable = paintable_box.document().paintable(); viewport_paintable && viewport_paintable->could_be_scrolled_by_wheel_event())
         return viewport_paintable->own_scroll_frame_index();
-    return {};
+    return { };
 }
 
 static void record_wheel_hit_test_target(PaintableBox const& paintable_box, DisplayListRecordingContext& context)
@@ -293,7 +293,7 @@ static void record_wheel_hit_test_target(PaintableBox const& paintable_box, Disp
     if (rect.is_empty())
         return;
 
-    auto target_scroll_frame_index = wheel_hit_test_target_scroll_frame_index_for(paintable_box).value_or({});
+    auto target_scroll_frame_index = wheel_hit_test_target_scroll_frame_index_for(paintable_box).value_or({ });
     auto corner_radii = paintable_box.border_radii_data().as_corners(context.device_pixel_converter());
     if (corner_radii.has_any_radius()) {
         context.display_list_recorder().compositor_wheel_hit_test_target_with_corner_radii({
@@ -393,7 +393,7 @@ ResolvedCSSFilter resolve_css_filter(CSS::Filter const& computed_filter, Paintab
             },
             [&](CSS::FilterOperation::DropShadow const& drop_shadow) {
                 auto to_css_px = [&](NonnullRefPtr<CSS::StyleValue const> const& length) {
-                    return CSS::Length::from_style_value(length, {}).absolute_length_to_px();
+                    return CSS::Length::from_style_value(length, { }).absolute_length_to_px();
                 };
                 auto color_context = CSS::ColorResolutionContext::for_layout_node_with_style(layout_node);
                 auto resolved_color = drop_shadow.color
@@ -528,12 +528,12 @@ void PaintableBox::reset_for_relayout()
     while (first_child())
         first_child()->remove();
 
-    m_containing_block = {};
+    m_containing_block = { };
 
-    m_offset = {};
-    m_content_size = {};
+    m_offset = { };
+    m_content_size = { };
 
-    m_box_model = {};
+    m_box_model = { };
 
     m_overflow_data.clear();
     m_override_borders_data.clear();
@@ -545,11 +545,11 @@ void PaintableBox::reset_for_relayout()
     m_absolute_padding_box_rect.clear();
     m_absolute_border_box_rect.clear();
 
-    m_enclosing_scroll_frame_index = {};
-    m_own_scroll_frame_index = {};
+    m_enclosing_scroll_frame_index = { };
+    m_own_scroll_frame_index = { };
     m_accumulated_visual_context_index = VISUAL_VIEWPORT_NODE_INDEX;
     m_accumulated_visual_context_for_descendants_index = VISUAL_VIEWPORT_NODE_INDEX;
-    m_fixed_background_visual_context = {};
+    m_fixed_background_visual_context = { };
 
     m_used_values_for_grid_template_columns = nullptr;
     m_used_values_for_grid_template_rows = nullptr;
@@ -574,14 +574,14 @@ CSSPixelPoint PaintableBox::scroll_offset() const
         return node.pseudo_element_generator()->scroll_offset(*pseudo_element);
 
     if (auto const* element = as_if<DOM::Element>(dom_node().ptr()))
-        return element->scroll_offset({});
-    return {};
+        return element->scroll_offset({ });
+    return { };
 }
 
 Optional<CSSPixelRect> PaintableBox::absolute_containing_line_box_rect() const
 {
     if (!m_containing_line_box_data.has_value())
-        return {};
+        return { };
 
     auto rect = m_containing_line_box_data->rect;
     if (auto containing_block = this->containing_block())
@@ -619,7 +619,7 @@ PaintableBox::ScrollHandled PaintableBox::set_scroll_offset(CSSPixelPoint offset
     if (auto pseudo_element = node.generated_for_pseudo_element(); pseudo_element.has_value()) {
         node.pseudo_element_generator()->set_scroll_offset(*pseudo_element, offset);
     } else if (auto* element = as_if<DOM::Element>(*dom_node())) {
-        element->set_scroll_offset({}, offset);
+        element->set_scroll_offset({ }, offset);
     } else {
         return ScrollHandled::No;
     }
@@ -761,7 +761,7 @@ CSSPixelRect PaintableBox::absolute_padding_box_rect() const
 Optional<CSSPixelRect> PaintableBox::absolute_resizer_rect(ChromeMetrics const& metrics) const
 {
     if (!has_resizer())
-        return {};
+        return { };
     auto padding_rect = absolute_padding_box_rect();
     CSSPixels x = is_chrome_mirrored() ? padding_rect.x() : padding_rect.right() - metrics.resize_gripper_size;
     CSSPixels y = padding_rect.bottom() - metrics.resize_gripper_size;
@@ -856,7 +856,7 @@ static CSSPixelRect united_rect_for_continuation_chain(PaintableBox const& start
                 result->unite(paintable_border_box_rect);
         }
     }
-    return result.value_or({});
+    return result.value_or({ });
 }
 
 CSSPixelRect PaintableBox::absolute_united_border_box_rect() const
@@ -887,7 +887,7 @@ Optional<CSSPixelRect> PaintableBox::get_clip_rect() const
         auto border_box = absolute_border_box_rect();
         return clip.to_rect().resolved(border_box);
     }
-    return {};
+    return { };
 }
 
 RefPtr<Scrollbar> PaintableBox::scrollbar(ScrollDirection direction) const
@@ -997,10 +997,10 @@ CSSPixels PaintableBox::available_scrollbar_length(ScrollDirection direction, Ch
 Optional<CSSPixelRect> PaintableBox::absolute_scrollbar_rect(ScrollDirection direction, bool with_gutter, ChromeMetrics const& metrics) const
 {
     if (!could_be_scrolled_by_wheel_event(direction))
-        return {};
+        return { };
 
     if (computed_values().scrollbar_width() == CSS::ScrollbarWidth::None)
-        return {};
+        return { };
 
     bool is_horizontal = direction == ScrollDirection::Horizontal;
     bool adjusting_for_resizer = has_resizer();
@@ -1039,15 +1039,15 @@ Optional<PaintableBox::ScrollbarData> PaintableBox::compute_scrollbar_data(Scrol
     auto overflow = is_horizontal ? computed_values().overflow_x() : computed_values().overflow_y();
 
     if (overflow != CSS::Overflow::Scroll && !could_be_scrolled_by_wheel_event(direction))
-        return {};
+        return { };
 
     if (!m_own_scroll_frame_index.value())
-        return {};
+        return { };
 
     CSSPixelRect scrollable_overflow_rect = this->scrollable_overflow_rect().value();
     CSSPixels scrollable_overflow_length = scrollable_overflow_rect.primary_size_for_orientation(orientation);
     if (scrollable_overflow_length == 0)
-        return {};
+        return { };
 
     auto const& scrollbar = is_horizontal ? m_horizontal_scrollbar : m_vertical_scrollbar;
     bool with_gutter = [&] {
@@ -1063,7 +1063,7 @@ Optional<PaintableBox::ScrollbarData> PaintableBox::compute_scrollbar_data(Scrol
     }();
     auto scrollbar_rect = absolute_scrollbar_rect(direction, with_gutter, metrics);
     if (!scrollbar_rect.has_value())
-        return {};
+        return { };
 
     CSSPixels thumb_thickness = metrics.scroll_thumb_thickness_thin;
     CSSPixels thumb_margin = metrics.scroll_thumb_padding_thin;
@@ -1077,7 +1077,7 @@ Optional<PaintableBox::ScrollbarData> PaintableBox::compute_scrollbar_data(Scrol
     CSSPixels min_thumb_length = min(usable_scrollbar_length, metrics.scroll_thumb_min_length);
     CSSPixels thumb_length = max(usable_scrollbar_length * (scrollport_size / scrollable_overflow_length), min_thumb_length);
 
-    ScrollbarData scrollbar_data = { .gutter_rect = {}, .thumb_rect = scrollbar_rect.value(), .thumb_travel_to_scroll_ratio = 0 };
+    ScrollbarData scrollbar_data = { .gutter_rect = { }, .thumb_rect = scrollbar_rect.value(), .thumb_travel_to_scroll_ratio = 0 };
 
     scrollbar_data.thumb_rect.set_primary_size_for_orientation(orientation, thumb_length);
     scrollbar_data.thumb_rect.set_secondary_size_for_orientation(orientation, thumb_thickness);
@@ -1147,6 +1147,9 @@ void PaintableBox::record_async_scrolling_metadata(DisplayListRecordingContext& 
 
 void PaintableBox::record_hit_test_items(DisplayListRecordingContext& context, PaintPhase phase) const
 {
+    if (phase != PaintPhase::Background && phase != PaintPhase::Overlay)
+        return;
+
     auto* hit_test_display_list = context.hit_test_display_list();
     if (!hit_test_display_list)
         return;
@@ -1419,7 +1422,7 @@ void PaintableBox::paint_grid_inspector_overlay(DisplayListRecordingContext& con
                 if (line.number == number)
                     return line.start;
             }
-            return {};
+            return { };
         };
 
         auto line_number_label = [](Layout::GridLayoutLine const& line) {
@@ -1609,7 +1612,7 @@ Optional<int> PaintableBox::effective_z_index() const
     if (is_positioned())
         return computed_values().z_index();
 
-    return {};
+    return { };
 }
 
 BordersData PaintableBox::remove_element_kind_from_borders_data(PaintableBox::BordersDataWithElementKind borders_data)
@@ -1744,7 +1747,7 @@ Optional<CSSPixelPoint> PaintableBox::transform_point_to_local(CSSPixelPoint scr
     auto const& visual_context_tree = viewport_paintable->visual_context_tree();
     auto result = visual_context_tree.transform_point_for_hit_test(m_accumulated_visual_context_index, screen_position.to_type<float>() * pixel_ratio, scroll_state);
     if (!result.has_value())
-        return {};
+        return { };
     return (*result / pixel_ratio).to_type<CSSPixels>();
 }
 
@@ -1758,7 +1761,7 @@ Optional<CSSPixelPoint> PaintableBox::transform_point_to_local_for_descendants(C
     auto const& visual_context_tree = viewport_paintable->visual_context_tree();
     auto result = visual_context_tree.transform_point_for_hit_test(m_accumulated_visual_context_for_descendants_index, screen_position.to_type<float>() * pixel_ratio, scroll_state);
     if (!result.has_value())
-        return {};
+        return { };
     return (*result / pixel_ratio).to_type<CSSPixels>();
 }
 
@@ -1939,12 +1942,12 @@ BorderRadiiData PaintableBox::border_radii_data() const
 {
     auto const& computed_values = this->computed_values();
     if (!computed_values.has_noninitial_border_radii())
-        return {};
+        return { };
     CSSPixelRect const border_rect { 0, 0, border_box_width(), border_box_height() };
-    auto border_top_left_radius = m_fragment_top_edge_away || m_fragment_left_edge_away ? CSS::BorderRadiusData {} : computed_values.border_top_left_radius();
-    auto border_top_right_radius = m_fragment_top_edge_away || m_fragment_right_edge_away ? CSS::BorderRadiusData {} : computed_values.border_top_right_radius();
-    auto border_bottom_right_radius = m_fragment_bottom_edge_away || m_fragment_right_edge_away ? CSS::BorderRadiusData {} : computed_values.border_bottom_right_radius();
-    auto border_bottom_left_radius = m_fragment_bottom_edge_away || m_fragment_left_edge_away ? CSS::BorderRadiusData {} : computed_values.border_bottom_left_radius();
+    auto border_top_left_radius = m_fragment_top_edge_away || m_fragment_left_edge_away ? CSS::BorderRadiusData { } : computed_values.border_top_left_radius();
+    auto border_top_right_radius = m_fragment_top_edge_away || m_fragment_right_edge_away ? CSS::BorderRadiusData { } : computed_values.border_top_right_radius();
+    auto border_bottom_right_radius = m_fragment_bottom_edge_away || m_fragment_right_edge_away ? CSS::BorderRadiusData { } : computed_values.border_bottom_right_radius();
+    auto border_bottom_left_radius = m_fragment_bottom_edge_away || m_fragment_left_edge_away ? CSS::BorderRadiusData { } : computed_values.border_bottom_left_radius();
     return normalize_border_radii_data(layout_node(), border_rect, border_rect,
         border_top_left_radius, border_top_right_radius,
         border_bottom_right_radius, border_bottom_left_radius);
@@ -1964,7 +1967,7 @@ CSSPixels PaintableBox::outline_offset() const
 ScrollFrameIndex PaintableBox::nearest_scroll_frame_index() const
 {
     if (is_fixed_position())
-        return {};
+        return { };
     auto paintable = this->containing_block();
     while (paintable) {
         if (paintable->own_scroll_frame_index().value())
@@ -1972,10 +1975,10 @@ ScrollFrameIndex PaintableBox::nearest_scroll_frame_index() const
         // Sticky elements need to find a scroll container even through fixed-position ancestors,
         // because they must reference a scrollport for their sticky offset computation.
         if (paintable->is_fixed_position() && !is_sticky_position())
-            return {};
+            return { };
         paintable = paintable->containing_block();
     }
-    return {};
+    return { };
 }
 
 RefPtr<PaintableBox const> PaintableBox::nearest_scrollable_ancestor() const
@@ -1997,14 +2000,14 @@ PaintableBox::PhysicalResizeAxes PaintableBox::physical_resize_axes() const
 
     // https://drafts.csswg.org/css-ui/#resize
     if (computed.resize() == CSS::Resize::None)
-        return {};
+        return { };
 
     // 4.1. ... The resize property applies to elements that are scroll containers. UAs may also apply it,
     // regardless of the value of the overflow property, to:
     // - Replaced elements representing images or videos, such as img, video, picture, svg, object, or canvas.
     // - The <iframe> element.
     if (computed.display().is_inline_outside() && computed.display().is_flow_inside())
-        return {};
+        return { };
 
     bool horizontal_writing_mode = computed.writing_mode() == CSS::WritingMode::HorizontalTb;
 

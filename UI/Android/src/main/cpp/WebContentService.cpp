@@ -46,7 +46,7 @@ static ErrorOr<void> load_autoplay_allowlist();
 
 ErrorOr<int> service_main(int ipc_socket)
 {
-    Core::EventLoop event_loop;
+    auto& event_loop = Core::EventLoop::initialize_for_current_thread();
 
     Web::Platform::EventLoopPlugin::install(*new Web::Platform::EventLoopPlugin);
 
@@ -85,7 +85,7 @@ ErrorOr<int> service_main(int ipc_socket)
 template<typename Client>
 ErrorOr<NonnullRefPtr<Client>> bind_service(void (*bind_method)(int))
 {
-    int socket_fds[2] {};
+    int socket_fds[2] { };
     TRY(Core::System::socketpair(AF_LOCAL, SOCK_STREAM, 0, socket_fds));
 
     int ui_fd = socket_fds[0];
@@ -126,7 +126,7 @@ static ErrorOr<void> load_content_blockers()
     auto& content_blocker = Web::ContentBlocker::the();
     TRY(content_blocker.set_patterns(patterns));
 
-    return {};
+    return { };
 }
 
 static ErrorOr<void> load_autoplay_allowlist()
@@ -153,5 +153,5 @@ static ErrorOr<void> load_autoplay_allowlist()
     auto& autoplay_allowlist = Web::PermissionsPolicy::AutoplayAllowlist::the();
     autoplay_allowlist.enable_for_origins(origins);
 
-    return {};
+    return { };
 }

@@ -30,7 +30,7 @@ CompositorState::~CompositorState()
 {
     if (!m_gpu_completion_timer)
         return;
-    m_gpu_completion_timer->on_timeout = {};
+    m_gpu_completion_timer->on_timeout = { };
     m_gpu_completion_timer->stop();
 }
 
@@ -101,8 +101,8 @@ void CompositorState::set_presentation_mode(Web::Compositor::CompositorContextId
     detach_from_parent_surface(context_id, context_state);
 
     presentation_mode.visit(
-        [](Empty const&) {},
-        [](Web::Compositor::PresentToClient const&) {},
+        [](Empty const&) { },
+        [](Web::Compositor::PresentToClient const&) { },
         [&](Web::Compositor::PublishToCompositorSurface const& mode) {
             auto* parent_context = context_if_present(mode.target_context_id);
             VERIFY(parent_context);
@@ -203,7 +203,7 @@ bool CompositorState::dispatch_mouse_event_to_web_content(Web::Compositor::Compo
 Web::Compositor::AsyncScrollEnqueueResult CompositorState::async_scroll_by(Web::Compositor::CompositorContextId context_id, Web::UniqueNodeID expected_document_id, Gfx::FloatPoint position, Gfx::FloatPoint delta, Gfx::IntRect viewport_rect, Web::Compositor::AsyncScrollOperationTracking operation_tracking)
 {
     if (!m_async_scrolling_enabled)
-        return {};
+        return { };
 
     auto* context = context_if_present(context_id);
     VERIFY(context);
@@ -284,13 +284,10 @@ void CompositorState::present_frame(Web::Compositor::CompositorContextId context
     m_pending_async_presents.append(context_id, viewport_rect, prepared_frame->bitmap_id);
     auto* pending_present = &m_pending_async_presents.last();
 
-    auto event_loop_reference = Core::EventLoop::current_weak();
+    auto& event_loop = Core::EventLoop::current();
     auto self = NonnullRefPtr { *this };
-    m_display_list_player->flush_async(*prepared_frame->rendered_surface, [self = move(self), event_loop_reference = move(event_loop_reference), pending_present] {
-        auto event_loop = event_loop_reference->take();
-        if (!event_loop.is_alive())
-            return;
-        event_loop->deferred_invoke([self = move(self), pending_present] {
+    m_display_list_player->flush_async(*prepared_frame->rendered_surface, [self = move(self), &event_loop, pending_present] {
+        event_loop.deferred_invoke([self = move(self), pending_present] {
             self->did_finish_async_present(*pending_present);
         });
     });
@@ -429,7 +426,7 @@ void CompositorState::did_finish_async_present(PendingAsyncPresent& pending_pres
 
     context->did_finish_gpu_present(bitmap_id);
     context->presentation_mode().visit(
-        [](Empty const&) {},
+        [](Empty const&) { },
         [&](Web::Compositor::PresentToClient const&) {
             VERIFY(m_client);
             m_client->did_present_frame(context_id, viewport_rect, bitmap_id);

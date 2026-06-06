@@ -62,7 +62,7 @@ static void append_select_option_row(GtkListBox* list_box, char const* label, bo
     gtk_list_box_append(GTK_LIST_BOX(list_box), row);
 }
 
-Tab::Tab(BrowserWindow& window, URL::URL url)
+Tab::Tab(BrowserWindow* window, URL::URL url)
     : Tab(window, nullptr, 0)
 {
     m_initial_url = move(url);
@@ -70,12 +70,12 @@ Tab::Tab(BrowserWindow& window, URL::URL url)
         navigate(m_initial_url);
 }
 
-Tab::Tab(BrowserWindow& window, WebView::WebContentClient& parent_client, u64 page_index)
+Tab::Tab(BrowserWindow* window, WebView::WebContentClient& parent_client, u64 page_index)
     : Tab(window, &parent_client, page_index)
 {
 }
 
-Tab::Tab(BrowserWindow& window, RefPtr<WebView::WebContentClient> parent_client, size_t page_index)
+Tab::Tab(BrowserWindow* window, RefPtr<WebView::WebContentClient> parent_client, size_t page_index)
     : m_window(window)
 {
     m_web_view = ladybird_web_view_new();
@@ -105,30 +105,36 @@ void Tab::setup_callbacks()
     };
 
     m_view->on_url_change = [this](auto const& url) {
-        if (m_window.current_tab() == this)
-            m_window.update_location_entry(url);
+        if (m_window->current_tab() != this)
+            return;
+        if (BrowserWindow::is_internal_url(url)) {
+            m_window->update_location_entry({ });
+            return;
+        }
+
+        m_window->update_location_entry(url);
     };
 
     m_view->on_load_start = [this](auto const& url, bool) {
+        adw_tab_page_set_indicator_icon(m_tab_page, nullptr);
+
         m_is_loading = true;
         m_favicon.clear();
         if (m_tab_page)
             adw_tab_page_set_loading(m_tab_page, TRUE);
-        if (m_window.current_tab() == this) {
-            m_window.update_location_favicon(nullptr);
-            m_window.update_location_loading(true);
+        if (m_window->current_tab() == this) {
+            m_window->update_location_favicon(nullptr);
+            m_window->update_location_loading(true);
+            m_window->update_location_entry(url);
         }
-
-        if (m_window.current_tab() == this)
-            m_window.update_location_entry(url);
     };
 
     m_view->on_load_finish = [this](auto const&) {
         m_is_loading = false;
         if (m_tab_page)
             adw_tab_page_set_loading(m_tab_page, FALSE);
-        if (m_window.current_tab() == this)
-            m_window.update_location_loading(false);
+        if (m_window->current_tab() == this)
+            m_window->update_location_loading(false);
     };
 
     m_view->on_cursor_change = [root](auto const& cursor) {
@@ -157,23 +163,23 @@ void Tab::setup_callbacks()
         auto url_string = url.serialize();
         auto byte_string = ByteString(url_string.bytes_as_string_view());
 
-        if (m_window.current_tab()) {
-            m_window.show_status_text(byte_string.characters());
+        if (m_window->current_tab()) {
+            m_window->show_status_text(byte_string.characters());
         }
     };
 
     m_view->on_link_unhover = [this]() {
-        if (m_window.current_tab()) {
-            m_window.hide_status_text();
+        if (m_window->current_tab()) {
+            m_window->hide_status_text();
         }
     };
 
     m_view->on_new_web_view = [this](auto activate_tab, auto, auto page_index) -> String {
         if (page_index.has_value()) {
-            auto& new_tab = m_window.create_child_tab(activate_tab, *this, page_index.value());
+            auto& new_tab = m_window->create_child_tab(activate_tab, *this, page_index.value());
             return new_tab.view().handle();
         }
-        auto& new_tab = m_window.create_new_tab(activate_tab);
+        auto& new_tab = m_window->create_new_tab(activate_tab);
         return new_tab.view().handle();
     };
 
@@ -182,32 +188,32 @@ void Tab::setup_callbacks()
     };
 
     m_view->on_close = [this]() {
-        m_window.close_tab(*this);
+        m_window->close_tab(*this);
     };
 
     m_view->on_zoom_level_changed = [this]() {
-        m_window.update_zoom_label();
+        m_window->update_zoom_label();
     };
 
     // Dialogs
     m_view->on_request_alert = [this](auto const& message) {
-        Dialogs::show_alert(m_window.gtk_window(), m_view.ptr(), message);
+        Dialogs::show_alert(m_window->gtk_window(), m_view.ptr(), message);
     };
 
     m_view->on_request_confirm = [this](auto const& message) {
-        Dialogs::show_confirm(m_window.gtk_window(), m_view.ptr(), message);
+        Dialogs::show_confirm(m_window->gtk_window(), m_view.ptr(), message);
     };
 
     m_view->on_request_prompt = [this](auto const& message, auto const& default_value) {
-        Dialogs::show_prompt(m_window.gtk_window(), m_view.ptr(), message, default_value);
+        Dialogs::show_prompt(m_window->gtk_window(), m_view.ptr(), message, default_value);
     };
 
     m_view->on_request_color_picker = [this](Color current_color) {
-        Dialogs::show_color_picker(m_window.gtk_window(), m_view.ptr(), current_color);
+        Dialogs::show_color_picker(m_window->gtk_window(), m_view.ptr(), current_color);
     };
 
     m_view->on_request_file_picker = [this](auto const& accepted_file_types, auto allow_multiple) {
-        Dialogs::show_file_picker(m_window.gtk_window(), m_view.ptr(), accepted_file_types, allow_multiple);
+        Dialogs::show_file_picker(m_window->gtk_window(), m_view.ptr(), accepted_file_types, allow_multiple);
     };
 
     m_view->on_request_select_dropdown = [this](Gfx::IntPoint content_position, i32 minimum_width, Vector<Web::HTML::SelectItem> items) {
@@ -215,28 +221,28 @@ void Tab::setup_callbacks()
     };
 
     m_view->on_find_in_page = [this](auto current_match_index, auto const& total_match_count) {
-        m_window.update_find_in_page_result(current_match_index, total_match_count);
+        m_window->update_find_in_page_result(current_match_index, total_match_count);
     };
 
     m_view->on_fullscreen_window = [this]() {
-        gtk_window_fullscreen(m_window.gtk_window());
+        gtk_window_fullscreen(m_window->gtk_window());
     };
 
     m_view->on_exit_fullscreen_window = [this]() {
-        gtk_window_unfullscreen(m_window.gtk_window());
+        gtk_window_unfullscreen(m_window->gtk_window());
     };
 
     m_view->on_restore_window = [this]() {
-        gtk_window_unmaximize(m_window.gtk_window());
-        gtk_window_unfullscreen(m_window.gtk_window());
+        gtk_window_unmaximize(m_window->gtk_window());
+        gtk_window_unfullscreen(m_window->gtk_window());
     };
 
     m_view->on_maximize_window = [this]() {
-        gtk_window_maximize(m_window.gtk_window());
+        gtk_window_maximize(m_window->gtk_window());
     };
 
     m_view->on_minimize_window = [this]() {
-        gtk_window_minimize(m_window.gtk_window());
+        gtk_window_minimize(m_window->gtk_window());
     };
 
     m_view->on_reposition_window = [](auto) {
@@ -246,7 +252,7 @@ void Tab::setup_callbacks()
     };
 
     m_view->on_resize_window = [this](auto size) {
-        gtk_window_set_default_size(m_window.gtk_window(), size.width(), size.height());
+        gtk_window_set_default_size(m_window->gtk_window(), size.width(), size.height());
     };
 
     m_view->on_favicon_change = [this](auto const& bitmap) {
@@ -255,17 +261,12 @@ void Tab::setup_callbacks()
         m_favicon = GObjectPtr<GdkPaintable>(GDK_PAINTABLE(g_object_ref(texture.ptr())));
         if (m_tab_page)
             adw_tab_page_set_icon(m_tab_page, G_ICON(texture.ptr()));
-        if (m_window.current_tab() == this)
-            m_window.update_location_favicon(m_favicon.ptr());
+        if (m_window->current_tab() == this)
+            m_window->update_location_favicon(m_favicon.ptr());
     };
 
-    m_view->on_audio_play_state_changed = [this](auto play_state) {
-        if (m_tab_page) {
-            adw_tab_page_set_indicator_icon(m_tab_page,
-                play_state == Web::HTML::AudioPlayState::Playing
-                    ? g_themed_icon_new("audio-volume-high-symbolic")
-                    : nullptr);
-        }
+    m_view->on_audio_play_state_changed = [this](auto) {
+        update_indicator_icon();
     };
 
     // FIXME: Support non-modal JS dialogs (on_request_set_prompt_text,
@@ -294,6 +295,21 @@ void Tab::update_tab_title()
     auto title = tab_title();
     adw_tab_page_set_title(m_tab_page, title.characters());
     adw_tab_page_set_tooltip(m_tab_page, title.characters());
+}
+
+void Tab::update_indicator_icon()
+{
+    if (!m_tab_page)
+        return;
+
+    char const* icon_name = nullptr;
+    if (m_view->audio_play_state() == Web::HTML::AudioPlayState::Playing)
+        icon_name = m_view->page_mute_state() == Web::HTML::MuteState::Unmuted
+            ? "audio-volume-high-symbolic"
+            : "audio-volume-muted-symbolic";
+
+    adw_tab_page_set_indicator_icon(m_tab_page,
+        icon_name ? g_themed_icon_new(icon_name) : nullptr);
 }
 
 void Tab::config_variable_changed(WebView::ConfigVariableID variable)

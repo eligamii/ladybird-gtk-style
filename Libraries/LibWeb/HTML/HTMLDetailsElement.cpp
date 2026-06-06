@@ -118,21 +118,21 @@ void HTMLDetailsElement::queue_a_details_toggle_event_task(String old_state, Str
         });
 
         // 3. Set element's details toggle task tracker to null.
-        m_details_toggle_task_tracker->task_id = {};
+        m_details_toggle_task_tracker->task_id = { };
     }
 
     // 2. Queue an element task given the DOM manipulation task source and element to run the following steps:
     auto task_id = queue_an_element_task(HTML::Task::Source::DOMManipulation, [this, old_state, new_state = move(new_state)]() mutable {
         // 1. Fire an event named toggle at element, using ToggleEvent, with the oldState attribute initialized to
         //    oldState and the newState attribute initialized to newState.
-        Bindings::ToggleEventInit event_init {};
+        Bindings::ToggleEventInit event_init { };
         event_init.old_state = move(old_state);
         event_init.new_state = move(new_state);
 
         dispatch_event(ToggleEvent::create(realm(), HTML::EventNames::toggle, move(event_init)));
 
         // 2. Set element's details toggle task tracker to null.
-        m_details_toggle_task_tracker = {};
+        m_details_toggle_task_tracker = { };
     });
 
     // 3. Set element's details toggle task tracker to a struct with task set to the just-queued task and old state set to oldState.
@@ -227,7 +227,7 @@ void HTMLDetailsElement::ensure_details_exclusivity_by_closing_the_given_element
 WebIDL::ExceptionOr<void> HTMLDetailsElement::create_shadow_tree_if_needed()
 {
     if (shadow_root())
-        return {};
+        return { };
 
     auto& realm = this->realm();
 
@@ -235,6 +235,7 @@ WebIDL::ExceptionOr<void> HTMLDetailsElement::create_shadow_tree_if_needed()
     auto shadow_root = realm.create<DOM::ShadowRoot>(document(), *this, Bindings::ShadowRootMode::Closed);
     shadow_root->set_user_agent_internal(true);
     shadow_root->set_slot_assignment(Bindings::SlotAssignmentMode::Manual);
+    set_shadow_root(shadow_root);
 
     // The first child element is a slot that is expected to take the details element's first summary element child, if any.
     auto summary_slot = TRY(DOM::create_element(document(), HTML::TagNames::slot, Namespace::HTML));
@@ -262,9 +263,8 @@ WebIDL::ExceptionOr<void> HTMLDetailsElement::create_shadow_tree_if_needed()
 
     m_summary_slot = static_cast<HTML::HTMLSlotElement&>(*summary_slot);
     m_descendants_slot = static_cast<HTML::HTMLSlotElement&>(*descendants_slot);
-    set_shadow_root(shadow_root);
 
-    return {};
+    return { };
 }
 
 void HTMLDetailsElement::update_shadow_tree_slots()

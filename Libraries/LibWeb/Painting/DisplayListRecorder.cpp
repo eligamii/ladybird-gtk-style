@@ -293,6 +293,9 @@ static DisplayListDataSpan append_filter_data(
 
 void DisplayListRecorder::replay_cached_commands(ReadonlyBytes command_bytes)
 {
+    if (command_bytes.is_empty())
+        return;
+
     DisplayList::for_each_command_header(command_bytes, [&](DisplayListCommandHeader const& header, ReadonlyBytes) {
         m_save_nesting_level += display_list_command_nesting_level_change(header.type);
     });
@@ -331,8 +334,8 @@ void DisplayListRecorder::end_masks(ReadonlySpan<MaskInfo> masks)
 {
     for (size_t i = masks.size(); i-- > 0;) {
         auto const& mask = masks[i];
-        auto mask_kind = mask.kind == Gfx::MaskKind::Luminance ? Optional<Gfx::MaskKind>(Gfx::MaskKind::Luminance) : Optional<Gfx::MaskKind> {};
-        apply_effects(1.0f, Gfx::CompositingAndBlendingOperator::DestinationIn, {}, mask_kind);
+        auto mask_kind = mask.kind == Gfx::MaskKind::Luminance ? Optional<Gfx::MaskKind>(Gfx::MaskKind::Luminance) : Optional<Gfx::MaskKind> { };
+        apply_effects(1.0f, Gfx::CompositingAndBlendingOperator::DestinationIn, { }, mask_kind);
         paint_nested_display_list(mask.display_list, mask.rect);
         restore(); // DstIn layer
         restore(); // content layer
@@ -578,7 +581,7 @@ void DisplayListRecorder::draw_text(Gfx::IntRect const& rect, Utf16String const&
     if (rect.is_empty() || color.alpha() == 0)
         return;
 
-    auto glyph_run = Gfx::shape_text({}, 0, raw_text.utf16_view(), font, Gfx::GlyphRun::TextType::Ltr);
+    auto glyph_run = Gfx::shape_text({ }, 0, raw_text.utf16_view(), font, Gfx::GlyphRun::TextType::Ltr);
     float baseline_x = 0;
     if (alignment == Gfx::TextAlignment::CenterLeft) {
         baseline_x = rect.x();
@@ -629,17 +632,17 @@ void DisplayListRecorder::translate(Gfx::IntPoint delta)
 
 void DisplayListRecorder::save()
 {
-    append_command(Save {});
+    append_command(Save { });
 }
 
 void DisplayListRecorder::save_layer()
 {
-    append_command(SaveLayer {});
+    append_command(SaveLayer { });
 }
 
 void DisplayListRecorder::restore()
 {
-    append_command(Restore {});
+    append_command(Restore { });
 }
 
 void DisplayListRecorder::apply_backdrop_filter(Gfx::IntRect const& backdrop_region, Gfx::CornerRadii const& corner_radii, Gfx::Filter const& backdrop_filter)
@@ -775,7 +778,7 @@ void DisplayListRecorder::apply_effects(float opacity, Gfx::CompositingAndBlendi
     CommandPayloadBuilder<ApplyEffects> payload_builder(m_display_list);
     auto filter_data = filter.has_value()
         ? append_filter_data(payload_builder, resource_storage(), filter.value())
-        : DisplayListDataSpan {};
+        : DisplayListDataSpan { };
     append_command(
         ApplyEffects {
             .opacity = opacity,
@@ -783,7 +786,7 @@ void DisplayListRecorder::apply_effects(float opacity, Gfx::CompositingAndBlendi
             .has_filter = filter.has_value(),
             .filter_data = filter_data,
             .has_mask_kind = mask_kind.has_value(),
-            .mask_kind = mask_kind.value_or({}) },
+            .mask_kind = mask_kind.value_or({ }) },
         payload_builder.inline_data());
 }
 

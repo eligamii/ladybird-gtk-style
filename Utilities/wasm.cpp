@@ -37,8 +37,8 @@
 #    include <unistd.h>
 #endif
 
-static OwnPtr<Stream> g_stdout {};
-static OwnPtr<Wasm::Printer> g_printer {};
+static OwnPtr<Stream> g_stdout { };
+static OwnPtr<Wasm::Printer> g_printer { };
 static StackInfo g_stack_info;
 static Wasm::BytecodeInterpreter g_interpreter(g_stack_info);
 
@@ -50,14 +50,14 @@ struct ParsedValue {
 static Optional<u128> convert_to_uint(StringView string)
 {
     if (string.is_empty())
-        return {};
+        return { };
 
     u128 value = 0;
     auto const characters = string.characters_without_null_termination();
 
     for (size_t i = 0; i < string.length(); i++) {
         if (characters[i] < '0' || characters[i] > '9')
-            return {};
+            return { };
 
         value *= 10;
         value += u128 { static_cast<u64>(characters[i] - '0'), 0 };
@@ -68,7 +68,7 @@ static Optional<u128> convert_to_uint(StringView string)
 static Optional<u128> convert_to_uint_from_hex(StringView string)
 {
     if (string.is_empty())
-        return {};
+        return { };
 
     u128 value = 0;
     auto const count = string.length();
@@ -77,11 +77,11 @@ static Optional<u128> convert_to_uint_from_hex(StringView string)
     for (size_t i = 0; i < count; i++) {
         char digit = string[i];
         if (value > (upper_bound >> 4))
-            return {};
+            return { };
 
         auto digit_val = decode_hex_digit(digit);
         if (digit_val == 255)
-            return {};
+            return { };
 
         value = (value << 4) + digit_val;
     }
@@ -268,14 +268,14 @@ static RefPtr<Wasm::Module> parse(StringView filename)
     auto result = Core::MappedFile::map(filename);
     if (result.is_error()) {
         warnln("Failed to open {}: {}", filename, result.error());
-        return {};
+        return { };
     }
 
     auto parse_result = Wasm::Module::parse(*result.value());
     if (parse_result.is_error()) {
         warnln("Something went wrong, either the file is invalid, or there's a bug with LibWasm!");
         warnln("The parse error was {}", Wasm::parse_error_to_byte_string(parse_result.error()));
-        return {};
+        return { };
     }
     return parse_result.release_value();
 }
@@ -481,7 +481,7 @@ ErrorOr<int> ladybird_main(Main::Arguments arguments)
                     }
                     auto result = TRY(trap_for_js_exception(vm, JS::call(vm, function, JS::js_null(), js_args.span())));
                     if (returns.is_empty())
-                        return Wasm::Result { Vector<Wasm::Value> {} };
+                        return Wasm::Result { Vector<Wasm::Value> { } };
 
                     if (returns.size() != 1)
                         return Wasm::Trap { ByteString("NYI") };
@@ -497,7 +497,7 @@ ErrorOr<int> ladybird_main(Main::Arguments arguments)
                         return Wasm::Result { Vector<Wasm::Value> { Wasm::Value { TRY(trap_for_js_exception(*vm, result.to_double(vm))) } } };
                     case Wasm::ValueType::V128: {
                         auto value = TRY(trap_for_js_exception(*vm, result.to_bigint(vm)));
-                        u128 out {};
+                        u128 out { };
                         Bytes data { bit_cast<u8*>(&out), sizeof(u128) };
                         if (value->big_integer().unsigned_value().export_data(data).size() != data.size()) {
                             dbgln("JS export function '{}' returned a v128 value that is not 128 bits wide", name);
@@ -595,7 +595,7 @@ ErrorOr<int> ladybird_main(Main::Arguments arguments)
                     for (auto& string : args_if_wasi)
                         strings.append(String::from_utf8(string).release_value_but_fixme_should_propagate_errors());
                     return strings; },
-                .provide_environment = {},
+                .provide_environment = { },
                 .provide_preopened_directories = [&] {
                     Vector<Wasm::Wasi::Implementation::MappedPath> paths;
                     for (auto& string : wasi_preopened_mappings) {
@@ -615,7 +615,7 @@ ErrorOr<int> ladybird_main(Main::Arguments arguments)
         }
 #endif
 
-        Core::EventLoop main_loop;
+        Core::EventLoop::initialize_for_current_thread();
         // First, resolve the linked modules
         Vector<NonnullRefPtr<Wasm::ModuleInstance>> linked_instances;
         Vector<NonnullRefPtr<Wasm::Module>> linked_modules;
@@ -912,7 +912,7 @@ ErrorOr<int> ladybird_main(Main::Arguments arguments)
                     struct [[gnu::packed]] {
                         u32 cmd = 0x19; // LC_SEGMENT_64
                         u32 cmdsize = 72 + 80;
-                        char segname[16] = {};
+                        char segname[16] = { };
                         u64 vmaddr = 0;
                         u64 vmsize;
                         u64 fileoff;
@@ -1010,7 +1010,7 @@ ErrorOr<int> ladybird_main(Main::Arguments arguments)
                         g_stdout->write_until_depleted("    code:\n"sv).release_value_but_fixme_should_propagate_errors();
                         printer.print(func.code());
                     },
-                    [](Wasm::HostFunction const&) {});
+                    [](Wasm::HostFunction const&) { });
             }
         };
         if (print) {

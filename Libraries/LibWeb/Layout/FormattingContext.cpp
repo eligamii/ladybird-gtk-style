@@ -36,12 +36,12 @@ enum class SizeDimension {
 };
 
 // https://drafts.csswg.org/css-sizing-3/#intrinsic-sizes
-static Optional<CSSPixels> max_content_size_for_replaced_element_without_natural_size(Box const& box, CSS::SizeWithAspectRatio const& natural_size, SizeDimension dimension, Optional<CSSPixels> definite_opposite_size = {})
+static Optional<CSSPixels> max_content_size_for_replaced_element_without_natural_size(Box const& box, CSS::SizeWithAspectRatio const& natural_size, SizeDimension dimension, Optional<CSSPixels> definite_opposite_size = { })
 {
     // the intrinsic sizes of replaced elements without natural sizes are defined below:
     auto is_width = dimension == SizeDimension::Width;
     if (!box.is_replaced_box() || (is_width ? natural_size.has_width() : natural_size.has_height()))
-        return {};
+        return { };
 
     // SVG Integration says that a non-top-level <svg> starts with auto width/height, and that with a viewBox, missing
     // width/height attributes "keep" their auto value. The resulting width, height, and aspect ratio are then
@@ -145,11 +145,11 @@ static bool is_text_control_input(HTML::HTMLInputElement const& input_element)
 static Optional<CSS::SizeWithAspectRatio> appearance_none_text_input_auto_content_box_size(Box const& box)
 {
     if (box.computed_values().appearance() != CSS::Appearance::None)
-        return {};
+        return { };
 
     auto const* input_element = as_if<HTML::HTMLInputElement>(box.dom_node());
     if (!input_element || !is_text_control_input(*input_element))
-        return {};
+        return { };
 
     // https://drafts.csswg.org/css-ui/#appearance-switching
     // "Widgets must not have their native appearance, and instead must have their primitive appearance."
@@ -300,7 +300,7 @@ Optional<FormattingContext::Type> FormattingContext::formatting_context_type_cre
         return Type::InternalReplaced;
 
     if (!box.can_have_children())
-        return {};
+        return { };
 
     auto display = box.display();
 
@@ -321,10 +321,10 @@ Optional<FormattingContext::Type> FormattingContext::formatting_context_type_cre
         return Type::Block;
 
     if (box.children_are_inline())
-        return {};
+        return { };
 
     if (display.is_table_column() || display.is_table_row_group() || display.is_table_header_group() || display.is_table_footer_group() || display.is_table_row() || display.is_table_column_group())
-        return {};
+        return { };
 
     // The box is a block container that doesn't create its own BFC.
     // It will be formatted by the containing BFC.
@@ -333,7 +333,7 @@ Optional<FormattingContext::Type> FormattingContext::formatting_context_type_cre
         // FIXME: We need this for <math> elements
         return Type::InternalDummy;
     }
-    return {};
+    return { };
 }
 
 // FIXME: This is a hack. Get rid of it.
@@ -429,7 +429,7 @@ OwnPtr<FormattingContext> FormattingContext::layout_inside(Box const& child_box,
     }
 
     if (!child_box.can_have_children())
-        return {};
+        return { };
 
     auto independent_formatting_context = create_independent_formatting_context_if_needed(m_state, layout_mode, child_box);
     if (independent_formatting_context)
@@ -537,7 +537,7 @@ Optional<CSSPixels> FormattingContext::compute_auto_height_for_absolutely_positi
     //       That's fine as long as the box is a BFC root.
     if (creates_block_formatting_context(box)) {
         if (before_or_after_inside_layout == BeforeOrAfterInsideLayout::Before)
-            return {};
+            return { };
         return compute_auto_height_for_block_formatting_context_root(box);
     }
 
@@ -1441,11 +1441,11 @@ static Optional<CSSPixelRect> compute_inline_containing_block_rect(InlineNode co
 {
     auto const* inline_dom_node = inline_node.dom_node();
     if (!inline_dom_node)
-        return {};
+        return { };
 
     auto const* outer_block = inline_node.non_anonymous_containing_block();
     if (!outer_block)
-        return {};
+        return { };
 
     Optional<CSSPixelRect> bounding_rect;
     auto union_rect = [&](CSSPixelRect const& rect) {
@@ -1500,7 +1500,7 @@ static Optional<CSSPixelRect> compute_inline_containing_block_rect(InlineNode co
     walk(*outer_block, outer_offset);
 
     if (!bounding_rect.has_value())
-        return {};
+        return { };
 
     // Expand the bounding rect by the inline's padding to get the padding box.
     if (auto const* inline_used_values = state.try_get(inline_node)) {
@@ -1531,7 +1531,7 @@ AbsposContainingBlockInfo FormattingContext::resolve_abspos_containing_block_inf
     if (inline_containing_block && box.containing_block()) {
         auto rect = compute_inline_containing_block_rect(*inline_containing_block, *box.containing_block(), m_state);
         if (rect.has_value())
-            return { *rect, horizontal_axis_mode, vertical_axis_mode, {}, {} };
+            return { *rect, horizontal_axis_mode, vertical_axis_mode, { }, { } };
     }
 
     // Normal case: padding box of the actual containing block.
@@ -1543,7 +1543,7 @@ AbsposContainingBlockInfo FormattingContext::resolve_abspos_containing_block_inf
         containing_block_state.content_width() + containing_block_state.padding_left + containing_block_state.padding_right,
         containing_block_state.content_height() + containing_block_state.padding_top + containing_block_state.padding_bottom
     };
-    return { rect, horizontal_axis_mode, vertical_axis_mode, {}, {} };
+    return { rect, horizontal_axis_mode, vertical_axis_mode, { }, { } };
 }
 
 // https://drafts.csswg.org/css-anchor-position-1/#anchor-pos
@@ -1591,16 +1591,16 @@ void FormattingContext::resolve_anchor_insets(Box& box) const
     auto resolve_anchor_rect = [&](CSS::AnchorStyleValue const& anchor) -> Optional<CSSPixelRect> {
         auto const& name = anchor.anchor_name().has_value() ? anchor.anchor_name() : default_anchor_name;
         if (!name.has_value())
-            return {};
+            return { };
 
         auto anchor_element = element->document().element_by_anchor_name(name.value(), *element);
         if (!anchor_element)
-            return {};
+            return { };
 
         // NB: We use unsafe_layout_node() because we are in the middle of layout.
         auto anchor_layout_node = anchor_element->unsafe_layout_node();
         if (!anchor_layout_node || !is<Box>(*anchor_layout_node))
-            return {};
+            return { };
 
         auto const& anchor_box = as<Box>(*anchor_layout_node);
         auto const& anchor_state = m_state.get(anchor_box);
@@ -1625,7 +1625,7 @@ void FormattingContext::resolve_anchor_insets(Box& box) const
         -> Optional<CSSPixels> {
         auto maybe_rect = resolve_anchor_rect(anchor);
         if (!maybe_rect.has_value())
-            return {};
+            return { };
         auto const& rect = maybe_rect.value();
         auto const& side = *anchor.anchor_side();
         if (side.is_keyword()) {
@@ -1636,13 +1636,13 @@ void FormattingContext::resolve_anchor_insets(Box& box) const
             // If its <anchor-side> specifies a physical keyword, it's specified in an inset property applicable to that
             // axis.
             case CSS::Keyword::Top:
-                return is_horizontal_axis ? Optional<CSSPixels> {} : rect.top();
+                return is_horizontal_axis ? Optional<CSSPixels> { } : rect.top();
             case CSS::Keyword::Bottom:
-                return is_horizontal_axis ? Optional<CSSPixels> {} : rect.bottom();
+                return is_horizontal_axis ? Optional<CSSPixels> { } : rect.bottom();
             case CSS::Keyword::Left:
-                return is_horizontal_axis ? rect.left() : Optional<CSSPixels> {};
+                return is_horizontal_axis ? rect.left() : Optional<CSSPixels> { };
             case CSS::Keyword::Right:
-                return is_horizontal_axis ? rect.right() : Optional<CSSPixels> {};
+                return is_horizontal_axis ? rect.right() : Optional<CSSPixels> { };
 
             // center
             //     Equivalent to 50%.
@@ -1705,7 +1705,7 @@ void FormattingContext::resolve_anchor_insets(Box& box) const
             }
             return rect.top() + CSSPixels::nearest_value_for(rect.height().to_double() * percentage);
         }
-        return {};
+        return { };
     };
 
     auto resolve_anchor_for_inset = [&](CSS::AnchorStyleValue const& anchor, bool is_from_end, bool is_horizontal_axis)
@@ -2555,7 +2555,7 @@ CSSPixels FormattingContext::box_baseline(Box const& box) const
 
     // https://drafts.csswg.org/css2/#propdef-vertical-align
     auto const& vertical_align = box.computed_values().vertical_align();
-    if (vertical_align.has<CSS::VerticalAlign>()) {
+    if (box.vertical_align_applies() && vertical_align.has<CSS::VerticalAlign>()) {
         switch (vertical_align.get<CSS::VerticalAlign>()) {
         case CSS::VerticalAlign::Top:
             // Top: Align the top of the aligned subtree with the top of the line box.

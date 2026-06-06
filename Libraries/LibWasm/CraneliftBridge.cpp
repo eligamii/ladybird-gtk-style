@@ -6,10 +6,13 @@
 
 #include <AK/ByteString.h>
 #include <AK/Checked.h>
+#include <AK/LexicalPath.h>
+#include <AK/NeverDestroyed.h>
 #include <AK/Platform.h>
 #include <AK/ScopeGuard.h>
 #include <CraneliftFFI.h>
 #include <LibCore/Process.h>
+#include <LibCore/System.h>
 #include <LibWasm/AbstractMachine/BytecodeInterpreter.h>
 #include <LibWasm/AbstractMachine/Configuration.h>
 #include <LibWasm/Printer/Printer.h>
@@ -218,7 +221,7 @@ static bool install_compiled_function(CompiledInstructions& target, ReadonlyByte
     VirtualProtect(jit_mem, rx_aligned_size, PAGE_EXECUTE_READ, &old_protect);
     FlushInstructionCache(GetCurrentProcess(), jit_mem, code_size);
     auto* func_ptr = static_cast<u8 const*>(jit_mem);
-    auto* handle = new CodeMapping { jit_mem, rx_aligned_size, {} };
+    auto* handle = new CodeMapping { jit_mem, rx_aligned_size, { } };
 #elif defined(AK_OS_MACOS)
     auto const page_size = static_cast<size_t>(sysconf(_SC_PAGESIZE));
     auto const rx_aligned_size = (code_size + page_size - 1) & ~(page_size - 1);
@@ -235,7 +238,7 @@ static bool install_compiled_function(CompiledInstructions& target, ReadonlyByte
     pthread_jit_write_protect_np(1);
     sys_icache_invalidate(jit_mapping, code_size);
     auto* func_ptr = static_cast<u8 const*>(jit_mapping);
-    auto* handle = new CodeMapping { jit_mapping, rx_aligned_size, {} };
+    auto* handle = new CodeMapping { jit_mapping, rx_aligned_size, { } };
 #else
     auto const page_size = static_cast<size_t>(sysconf(_SC_PAGESIZE));
     auto const rx_aligned_size = (code_size + page_size - 1) & ~(page_size - 1);
@@ -249,7 +252,7 @@ static bool install_compiled_function(CompiledInstructions& target, ReadonlyByte
     }
     __builtin___clear_cache(static_cast<char*>(rw_mapping), static_cast<char*>(rw_mapping) + code_size);
     auto* func_ptr = static_cast<u8 const*>(rw_mapping);
-    auto* handle = new CodeMapping { rw_mapping, rx_aligned_size, {} };
+    auto* handle = new CodeMapping { rw_mapping, rx_aligned_size, { } };
 #endif
 
     handle->traps.ensure_capacity(traps.size());
@@ -351,7 +354,7 @@ static ALWAYS_INLINE i32 wasm_cl_finish_call(BytecodeInterpreter& interpreter, C
     }
 
     // non-compiled call (interpreter or host function)
-    Wasm::Result result { Vector<Value> {} };
+    Wasm::Result result { Vector<Value> { } };
     if (instance->has<WasmFunction>()) {
         BytecodeInterpreter::CallFrameHandle handle { interpreter, config };
         result = config.call(interpreter, address, args);
@@ -383,7 +386,7 @@ i32 wasm_cl_call_function(void* interp_ptr, void* config_ptr, i32 func_index)
 
     auto address = functions[func_index];
 
-    SourcesAndDestination addrs {};
+    SourcesAndDestination addrs { };
     addrs.sources[0] = Dispatch::RegisterOrStack::Stack;
     addrs.sources[1] = Dispatch::RegisterOrStack::Stack;
     addrs.sources[2] = Dispatch::RegisterOrStack::Stack;
@@ -648,7 +651,7 @@ i32 wasm_cl_call_indirect(void* interp_ptr, void* config_ptr, i32 table_idx, i32
     if (type_actual.parameters() != type_expected.parameters() || type_actual.results() != type_expected.results())
         return interpreter.set_trap(Trap::from_string("Indirect call type mismatch"));
 
-    SourcesAndDestination addrs {};
+    SourcesAndDestination addrs { };
     addrs.sources[0] = Dispatch::RegisterOrStack::Stack;
     addrs.sources[1] = Dispatch::RegisterOrStack::Stack;
     addrs.sources[2] = Dispatch::RegisterOrStack::Stack;
@@ -971,7 +974,7 @@ static RuntimeHelpers make_runtime_helpers()
 
 static CraneliftInsn serialize_insn(Dispatch const& dispatch, SourcesAndDestination const& addr)
 {
-    CraneliftInsn out {};
+    CraneliftInsn out { };
     auto const* insn = dispatch.instruction;
     out.opcode = insn->opcode().value();
     out.sources[0] = addr.sources[0];
@@ -1103,6 +1106,33 @@ static CraneliftInsn serialize_insn(Dispatch const& dispatch, SourcesAndDestinat
     return out;
 }
 
+static StringView resolve_cranelift_compiler_path()
+{
+    // Lookup order: LADYBIRD_CRANELIFT_COMPILER, compile-time path, sibling-of-self.
+    static NeverDestroyed<ByteString> s_path = []() -> ByteString {
+        auto file_exists = [](ByteString const& path) {
+            return !Core::System::stat(path).is_error();
+        };
+
+        if (auto const* env = getenv("LADYBIRD_CRANELIFT_COMPILER"); env && *env) {
+            if (file_exists(env))
+                return ByteString { env };
+        }
+
+        if (file_exists(WASM_CRANELIFT_COMPILER_PATH))
+            return WASM_CRANELIFT_COMPILER_PATH;
+
+        if (auto self_path = Core::System::current_executable_path(); !self_path.is_error()) {
+            auto sibling = LexicalPath::join(LexicalPath::dirname(self_path.value()), "cranelift-compiler"sv).string();
+            if (file_exists(sibling))
+                return sibling;
+        }
+
+        return WASM_CRANELIFT_COMPILER_PATH;
+    }();
+    return s_path->view();
+}
+
 static void try_cranelift_compile_batch(Vector<BatchInput>& batch)
 {
     if (batch.is_empty())
@@ -1214,7 +1244,7 @@ static void try_cranelift_compile_batch(Vector<BatchInput>& batch)
 
     auto process_result = Core::Process::spawn({
         .name = "cranelift-compiler"sv,
-        .executable = WASM_CRANELIFT_COMPILER_PATH,
+        .executable = resolve_cranelift_compiler_path(),
         .arguments = arguments,
     });
     if (process_result.is_error())
@@ -1264,7 +1294,7 @@ static void try_cranelift_compile_batch(Vector<BatchInput>& batch)
             ? nullptr
             : reinterpret_cast<HelperReloc const*>(base + reloc_region_start + reloc_offset);
         auto traps = trap_count == 0
-            ? ReadonlySpan<CraneliftTrap> {}
+            ? ReadonlySpan<CraneliftTrap> { }
             : ReadonlySpan<CraneliftTrap> { reinterpret_cast<CraneliftTrap const*>(base + reloc_region_start + trap_offset), trap_count };
 
         auto& capture = cranelift_cache_state().cache_capture;
@@ -1427,7 +1457,7 @@ bool try_cranelift_compile(CompiledInstructions& compiled, u32 result_arity)
             auto const& table_args = dispatches[i].instruction->arguments().get<Instruction::TableBranchArgs>();
             auto const total = table_args.labels.size();
             for (size_t base = 8; base < total; base += 8) {
-                CraneliftInsn cont {};
+                CraneliftInsn cont { };
                 cont.opcode = Instructions::synthetic_br_table_cont.value();
                 auto const chunk = min(total - base, static_cast<size_t>(8));
                 cont.imm3 = static_cast<u32>(chunk);
@@ -1507,9 +1537,9 @@ Optional<ByteBuffer> serialize_cranelift_cache_blob(ReadonlyBytes wasm_hash)
     auto const& capture = cranelift_cache_state().cache_capture;
 
     if (!capture.capturing || capture.records.is_empty())
-        return {};
+        return { };
     if (wasm_hash.size() != 32)
-        return {};
+        return { };
 
     static auto helpers = make_runtime_helpers();
 
@@ -1523,7 +1553,7 @@ Optional<ByteBuffer> serialize_cranelift_cache_blob(ReadonlyBytes wasm_hash)
 
     auto blob_or_error = ByteBuffer::create_zeroed(total_size);
     if (blob_or_error.is_error())
-        return {};
+        return { };
     auto blob = blob_or_error.release_value();
     auto* out = blob.data();
 

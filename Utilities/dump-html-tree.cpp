@@ -54,7 +54,7 @@ public:
     virtual Web::Page const& page() const override { return *m_page; }
     virtual bool is_connection_open() const override { return true; }
     virtual Gfx::Palette palette() const override { return Gfx::Palette(*m_palette_impl); }
-    virtual Web::DevicePixelRect screen_rect() const override { return {}; }
+    virtual Web::DevicePixelRect screen_rect() const override { return { }; }
     virtual double zoom_level() const override { return 1.0; }
     virtual double device_pixel_ratio() const override { return 1.0; }
     virtual double device_pixels_per_css_pixel() const override { return 1.0; }
@@ -329,7 +329,7 @@ ErrorOr<int> ladybird_main(Main::Arguments arguments)
 
     StringView input { input_data };
 
-    [[maybe_unused]] Core::EventLoop event_loop;
+    [[maybe_unused]] auto& event_loop = Core::EventLoop::initialize_for_current_thread();
     Web::Platform::EventLoopPlugin::install(*new Web::Platform::EventLoopPlugin);
     Web::Platform::FontPlugin::install(*new Web::Platform::FontPlugin(false));
     Web::Bindings::initialize_main_thread_vm(Web::Bindings::AgentType::SimilarOriginWindow);
@@ -339,7 +339,7 @@ ErrorOr<int> ladybird_main(Main::Arguments arguments)
     auto page = Web::Page::create(vm, page_client);
     page->set_is_scripting_enabled(false);
     page_client->set_page(page);
-    page->set_top_level_traversable(Web::HTML::TraversableNavigable::create_a_new_top_level_traversable(page, nullptr, {}));
+    page->set_top_level_traversable(Web::HTML::TraversableNavigable::create_a_new_top_level_traversable(page, nullptr, { }));
     auto& origin_document = *page->top_level_traversable()->active_document();
     auto& realm = origin_document.realm();
 

@@ -125,7 +125,7 @@ Optional<PageClient&> ConnectionFromClient::page(u64 index, SourceLocation locat
         return *page;
 
     dbgln("ConnectionFromClient::{}: Did not find a page with ID {}", location.function_name(), index);
-    return {};
+    return { };
 }
 
 Optional<PageClient const&> ConnectionFromClient::page(u64 index, SourceLocation location) const
@@ -134,7 +134,7 @@ Optional<PageClient const&> ConnectionFromClient::page(u64 index, SourceLocation
         return *page;
 
     dbgln("ConnectionFromClient::{}: Did not find a page with ID {}", location.function_name(), index);
-    return {};
+    return { };
 }
 
 void ConnectionFromClient::close_server()
@@ -146,7 +146,7 @@ Messages::WebContentServer::GetWindowHandleResponse ConnectionFromClient::get_wi
 {
     if (auto page = this->page(page_id); page.has_value())
         return page->page().top_level_traversable()->window_handle();
-    return String {};
+    return String { };
 }
 
 void ConnectionFromClient::set_window_handle(u64 page_id, String handle)
@@ -424,7 +424,7 @@ void ConnectionFromClient::debug_request(u64 page_id, ByteString request, ByteSt
                     nodes_to_visit.enqueue(child.ptr());
                 if (auto* element = as_if<Web::DOM::Element>(node)) {
                     auto styles = doc->style_computer().compute_style({ *element });
-                    dump_style(MUST(String::formatted("Element {}", node->debug_description())), styles, element->custom_property_data({}));
+                    dump_style(MUST(String::formatted("Element {}", node->debug_description())), styles, element->custom_property_data({ }));
 
                     element->for_each_synthetic_pseudo_element([&](Web::CSS::PseudoElement pseudo_element_type, Web::DOM::PseudoElement const& pseudo_element) {
                         if (!pseudo_element.computed_properties())
@@ -557,7 +557,7 @@ void ConnectionFromClient::inspect_dom_node(u64 page_id, WebView::DOMNodePropert
 
     auto* node = Web::DOM::Node::from_unique_id(node_id);
     if (!node || !node->is_element()) {
-        async_did_inspect_dom_node(page_id, { property_type, {} });
+        async_did_inspect_dom_node(page_id, { property_type, { } });
         return;
     }
 
@@ -570,14 +570,16 @@ void ConnectionFromClient::inspect_dom_node(u64 page_id, WebView::DOMNodePropert
     auto properties = element.computed_properties(pseudo_element);
 
     if (!properties) {
-        async_did_inspect_dom_node(page_id, { property_type, {} });
+        async_did_inspect_dom_node(page_id, { property_type, { } });
         return;
     }
+
+    node->document().update_layout(Web::DOM::UpdateLayoutReason::Debugging);
 
     // Nodes without layout (aka non-visible nodes) do not have box metrics, but DevTools can still ask for their style
     // rules and computed properties.
     if (property_type == WebView::DOMNodeProperties::Type::Layout && !node->layout_node()) {
-        async_did_inspect_dom_node(page_id, { property_type, {} });
+        async_did_inspect_dom_node(page_id, { property_type, { } });
         return;
     }
 
@@ -603,7 +605,7 @@ void ConnectionFromClient::inspect_dom_node(u64 page_id, WebView::DOMNodePropert
     auto serialize_layout = [&](Web::Layout::Node const* layout_node) {
         auto first_paintable = layout_node ? layout_node->first_paintable() : nullptr;
         if (!layout_node || !layout_node->is_box() || !first_paintable || !first_paintable->is_paintable_box()) {
-            return JsonObject {};
+            return JsonObject { };
         }
 
         auto const& paintable_box = as<Web::Painting::PaintableBox>(*first_paintable);
@@ -863,11 +865,11 @@ static Optional<JsonObject> flex_layout_for_node(Web::DOM::Node const& node)
 {
     auto paintable_box = node.paintable_box();
     if (!paintable_box)
-        return {};
+        return { };
 
     auto const* flex_layout_data = paintable_box->flex_layout_data();
     if (!flex_layout_data)
-        return {};
+        return { };
 
     JsonObject properties;
     properties.set("align-content"sv, Web::CSS::to_string(flex_layout_data->align_content));
@@ -887,11 +889,11 @@ static Optional<JsonObject> grid_layout_for_node(Web::DOM::Node const& node)
 {
     auto paintable_box = node.paintable_box();
     if (!paintable_box)
-        return {};
+        return { };
 
     auto const* grid_layout_data = paintable_box->grid_layout_data();
     if (!grid_layout_data)
-        return {};
+        return { };
 
     JsonObject layout;
     layout.set("containerNodeId"sv, node.unique_id().value());
@@ -1019,7 +1021,7 @@ void ConnectionFromClient::highlight_dom_node(u64 page_id, Web::UniqueNodeID nod
 
     for (auto& navigable : Web::HTML::all_navigables()) {
         if (navigable->active_document() != nullptr) {
-            navigable->active_document()->set_highlighted_node(nullptr, {});
+            navigable->active_document()->set_highlighted_node(nullptr, { });
         }
     }
 
@@ -1279,7 +1281,7 @@ void ConnectionFromClient::set_dom_node_outer_html(u64 page_id, Web::UniqueNodeI
 {
     auto* dom_node = Web::DOM::Node::from_unique_id(node_id);
     if (!dom_node) {
-        async_did_finish_editing_dom_node(page_id, {});
+        async_did_finish_editing_dom_node(page_id, { });
         return;
     }
 
@@ -1290,7 +1292,7 @@ void ConnectionFromClient::set_dom_node_outer_html(u64 page_id, Web::UniqueNodeI
         auto& character_data = static_cast<Web::DOM::CharacterData&>(*dom_node);
         character_data.set_data(Utf16String::from_utf8(html));
     } else {
-        async_did_finish_editing_dom_node(page_id, {});
+        async_did_finish_editing_dom_node(page_id, { });
         return;
     }
 
@@ -1301,7 +1303,7 @@ void ConnectionFromClient::set_dom_node_text(u64 page_id, Web::UniqueNodeID node
 {
     auto* dom_node = Web::DOM::Node::from_unique_id(node_id);
     if (!dom_node || (!dom_node->is_text() && !dom_node->is_comment())) {
-        async_did_finish_editing_dom_node(page_id, {});
+        async_did_finish_editing_dom_node(page_id, { });
         return;
     }
 
@@ -1315,7 +1317,7 @@ void ConnectionFromClient::set_dom_node_tag(u64 page_id, Web::UniqueNodeID node_
 {
     auto* dom_node = Web::DOM::Node::from_unique_id(node_id);
     if (!dom_node || !dom_node->is_element() || !dom_node->parent()) {
-        async_did_finish_editing_dom_node(page_id, {});
+        async_did_finish_editing_dom_node(page_id, { });
         return;
     }
 
@@ -1339,7 +1341,7 @@ void ConnectionFromClient::add_dom_node_attributes(u64 page_id, Web::UniqueNodeI
 {
     auto* dom_node = Web::DOM::Node::from_unique_id(node_id);
     if (!dom_node || !dom_node->is_element()) {
-        async_did_finish_editing_dom_node(page_id, {});
+        async_did_finish_editing_dom_node(page_id, { });
         return;
     }
 
@@ -1357,7 +1359,7 @@ void ConnectionFromClient::replace_dom_node_attribute(u64 page_id, Web::UniqueNo
 {
     auto* dom_node = Web::DOM::Node::from_unique_id(node_id);
     if (!dom_node || !dom_node->is_element()) {
-        async_did_finish_editing_dom_node(page_id, {});
+        async_did_finish_editing_dom_node(page_id, { });
         return;
     }
 
@@ -1382,7 +1384,7 @@ void ConnectionFromClient::create_child_element(u64 page_id, Web::UniqueNodeID n
 {
     auto* dom_node = Web::DOM::Node::from_unique_id(node_id);
     if (!dom_node) {
-        async_did_finish_editing_dom_node(page_id, {});
+        async_did_finish_editing_dom_node(page_id, { });
         return;
     }
 
@@ -1396,7 +1398,7 @@ void ConnectionFromClient::create_child_text_node(u64 page_id, Web::UniqueNodeID
 {
     auto* dom_node = Web::DOM::Node::from_unique_id(node_id);
     if (!dom_node) {
-        async_did_finish_editing_dom_node(page_id, {});
+        async_did_finish_editing_dom_node(page_id, { });
         return;
     }
 
@@ -1412,7 +1414,7 @@ void ConnectionFromClient::insert_dom_node_before(u64 page_id, Web::UniqueNodeID
     auto* parent_dom_node = Web::DOM::Node::from_unique_id(parent_node_id);
 
     if (!dom_node || !parent_dom_node) {
-        async_did_finish_editing_dom_node(page_id, {});
+        async_did_finish_editing_dom_node(page_id, { });
         return;
     }
 
@@ -1421,7 +1423,7 @@ void ConnectionFromClient::insert_dom_node_before(u64 page_id, Web::UniqueNodeID
         sibling_dom_node = Web::DOM::Node::from_unique_id(*sibling_node_id);
 
         if (!sibling_dom_node) {
-            async_did_finish_editing_dom_node(page_id, {});
+            async_did_finish_editing_dom_node(page_id, { });
             return;
         }
     }
@@ -1434,7 +1436,7 @@ void ConnectionFromClient::clone_dom_node(u64 page_id, Web::UniqueNodeID node_id
 {
     auto* dom_node = Web::DOM::Node::from_unique_id(node_id);
     if (!dom_node || !dom_node->parent_node()) {
-        async_did_finish_editing_dom_node(page_id, {});
+        async_did_finish_editing_dom_node(page_id, { });
         return;
     }
 
@@ -1452,13 +1454,13 @@ void ConnectionFromClient::remove_dom_node(u64 page_id, Web::UniqueNodeID node_i
 
     auto* active_document = page->page().top_level_browsing_context().active_document();
     if (!active_document) {
-        async_did_finish_editing_dom_node(page_id, {});
+        async_did_finish_editing_dom_node(page_id, { });
         return;
     }
 
     auto* dom_node = Web::DOM::Node::from_unique_id(node_id);
     if (!dom_node) {
-        async_did_finish_editing_dom_node(page_id, {});
+        async_did_finish_editing_dom_node(page_id, { });
         return;
     }
 
@@ -1477,7 +1479,7 @@ void ConnectionFromClient::take_document_screenshot(u64 page_id)
     if (!page.has_value())
         return;
 
-    page->queue_screenshot_task({});
+    page->queue_screenshot_task({ });
 }
 
 void ConnectionFromClient::take_dom_node_screenshot(u64 page_id, Web::UniqueNodeID node_id)
@@ -1585,7 +1587,7 @@ void ConnectionFromClient::request_internal_page_info(u64 page_id, WebView::Page
 {
     auto page = this->page(page_id);
     if (!page.has_value()) {
-        async_did_get_internal_page_info(page_id, type, {});
+        async_did_get_internal_page_info(page_id, type, { });
         return;
     }
 
@@ -1629,14 +1631,14 @@ Messages::WebContentServer::GetSelectedTextResponse ConnectionFromClient::get_se
 {
     if (auto page = this->page(page_id); page.has_value())
         return page->page().focused_navigable().selected_text().to_byte_string();
-    return ByteString {};
+    return ByteString { };
 }
 
 Messages::WebContentServer::CutSelectedTextResponse ConnectionFromClient::cut_selected_text(u64 page_id)
 {
     if (auto page = this->page(page_id); page.has_value())
         return page->page().focused_navigable().cut_selected_text().to_byte_string();
-    return ByteString {};
+    return ByteString { };
 }
 
 void ConnectionFromClient::select_all(u64 page_id)

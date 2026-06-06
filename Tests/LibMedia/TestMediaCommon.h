@@ -53,7 +53,7 @@ static inline void decode_video(StringView path, size_t expected_frame_count, T 
         for (auto const& frame : frames) {
             MUST(decoder->receive_coded_data(block.timestamp().value(), block.duration().value_or(AK::Duration::zero()), frame));
             while (true) {
-                auto frame_result = decoder->get_decoded_frame({});
+                auto frame_result = decoder->get_decoded_frame({ });
                 if (frame_result.is_error()) {
                     if (frame_result.error().category() == Media::DecoderErrorCategory::NeedsMoreInput)
                         break;
@@ -69,7 +69,7 @@ static inline void decode_video(StringView path, size_t expected_frame_count, T 
     VERIFY_NOT_REACHED();
 }
 
-static inline void decode_audio(StringView path, u32 sample_rate, u8 channel_count, size_t expected_frame_count, Optional<Audio::ChannelMap> expected_channel_map = {})
+static inline void decode_audio(StringView path, u32 sample_rate, u8 channel_count, size_t expected_frame_count, Optional<Audio::ChannelMap> expected_channel_map = { })
 {
     Core::EventLoop loop;
 
@@ -83,7 +83,7 @@ static inline void decode_audio(StringView path, u32 sample_rate, u8 channel_cou
     }());
     auto tracks = TRY_OR_FAIL(demuxer->get_tracks_for_type(Media::TrackType::Audio));
     VERIFY(!tracks.is_empty());
-    auto producer = TRY_OR_FAIL(Media::DecodedAudioProducer::try_create(Core::EventLoop::current_weak(), demuxer, tracks[0]));
+    auto producer = TRY_OR_FAIL(Media::DecodedAudioProducer::try_create(loop, demuxer, tracks[0]));
 
     producer->set_error_handler([&](Media::DecoderError&&) {
         FAIL("An error occurred while decoding.");

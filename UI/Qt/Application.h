@@ -16,11 +16,11 @@
 namespace Ladybird {
 
 struct WindowConfiguration {
-    Optional<Web::DevicePixels> x {};
-    Optional<Web::DevicePixels> y {};
-    Optional<Web::DevicePixels> width {};
-    Optional<Web::DevicePixels> height {};
-    Optional<bool> maximized {};
+    Optional<Web::DevicePixels> x { };
+    Optional<Web::DevicePixels> y { };
+    Optional<Web::DevicePixels> width { };
+    Optional<Web::DevicePixels> height { };
+    Optional<bool> maximized { };
 };
 
 class Application final : public WebView::Application {
@@ -30,7 +30,7 @@ public:
     virtual ~Application() override;
 
     Function<void(URL::URL)> on_open_file;
-    BrowserWindow& new_window(Vector<URL::URL> const& initial_urls, WindowConfiguration const& = {}, BrowserWindow::IsPopupWindow is_popup_window = BrowserWindow::IsPopupWindow::No, Tab* parent_tab = nullptr, Optional<u64> page_index = {});
+    BrowserWindow& new_window(Vector<URL::URL> const& initial_urls, WindowConfiguration const& = { }, BrowserWindow::IsPopupWindow is_popup_window = BrowserWindow::IsPopupWindow::No, Tab* parent_tab = nullptr, Optional<u64> page_index = { });
 
     BrowserWindow& active_window() const { return *m_active_window; }
     void set_active_window(BrowserWindow& w) { m_active_window = &w; }
@@ -42,7 +42,7 @@ private:
     explicit Application();
 
     virtual void create_platform_options(WebView::BrowserOptions&, WebView::RequestServerOptions&, WebView::WebContentOptions&) override;
-    virtual NonnullOwnPtr<Core::EventLoop> create_platform_event_loop() override;
+    virtual Core::EventLoop& create_platform_event_loop() override;
 
     virtual Optional<WebView::ViewImplementation&> active_web_view() const override;
     virtual Optional<WebView::ViewImplementation&> open_blank_new_tab(Web::HTML::ActivateTab) const override;

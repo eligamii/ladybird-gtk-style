@@ -101,8 +101,7 @@ ColorResolutionContext ColorResolutionContext::for_element(DOM::AbstractElement 
 
     return {
         .color_scheme = color_scheme,
-        .current_color = element.computed_properties()->color(PropertyID::Color, { color_scheme, CSS::InitialValues::color(), element.document(), calculation_resolution_context }),
-        .document = element.document(),
+        .current_color = element.computed_properties()->color(PropertyID::Color, { color_scheme, CSS::InitialValues::color(), calculation_resolution_context }),
         .calculation_resolution_context = calculation_resolution_context
     };
 }
@@ -112,7 +111,6 @@ ColorResolutionContext ColorResolutionContext::for_layout_node_with_style(Layout
     return {
         .color_scheme = layout_node.computed_values().color_scheme(),
         .current_color = layout_node.computed_values().color(),
-        .document = layout_node.document(),
         .calculation_resolution_context = { .length_resolution_context = Length::ResolutionContext::for_layout_node(layout_node) },
     };
 }
@@ -164,7 +162,7 @@ Vector<Parser::ComponentValue> StyleValue::tokenize() const
 {
     // This is an inefficient way of producing ComponentValues, but it's guaranteed to work for types that round-trip.
     // FIXME: Implement better versions in the subclasses.
-    return Parser::Parser::create(Parser::ParsingParams {}, to_string(SerializationMode::Normal)).parse_as_list_of_component_values();
+    return Parser::Parser::create(Parser::ParsingParams { }, to_string(SerializationMode::Normal)).parse_as_list_of_component_values();
 }
 
 // https://drafts.css-houdini.org/css-typed-om-1/#reify-as-a-cssstylevalue
@@ -191,7 +189,7 @@ i32 int_from_style_value(NonnullRefPtr<StyleValue const> const& style_value)
         return style_value->as_integer().integer();
 
     if (style_value->is_calculated())
-        return style_value->as_calculated().resolve_integer({}).value();
+        return style_value->as_calculated().resolve_integer({ }).value();
 
     VERIFY_NOT_REACHED();
 }
@@ -205,12 +203,12 @@ double number_from_style_value(NonnullRefPtr<StyleValue const> const& style_valu
         auto const& calculated_style_value = style_value->as_calculated();
 
         if (calculated_style_value.resolves_to_number())
-            return calculated_style_value.resolve_number({}).value();
+            return calculated_style_value.resolve_number({ }).value();
 
         if (calculated_style_value.resolves_to_percentage()) {
             VERIFY(percentage_basis.has_value());
 
-            return calculated_style_value.resolve_percentage({}).value().as_fraction() * percentage_basis.value();
+            return calculated_style_value.resolve_percentage({ }).value().as_fraction() * percentage_basis.value();
         }
 
         VERIFY_NOT_REACHED();

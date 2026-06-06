@@ -20,6 +20,7 @@ struct LadybirdBrowserWindow {
     GtkMenuButton* menu_button { nullptr };
     AdwTabView* tab_view { nullptr };
     AdwTabBar* tab_bar { nullptr };
+    AdwTabOverview* tab_overview { nullptr };
     AdwToastOverlay* toast_overlay { nullptr };
     GtkRevealer* find_bar_revealer { nullptr };
     GtkSearchEntry* find_entry { nullptr };
@@ -66,6 +67,7 @@ static void ladybird_browser_window_class_init(LadybirdBrowserWindowClass* klass
     gtk_widget_class_bind_template_child(widget_class, LadybirdBrowserWindow, hamburger_menu);
     gtk_widget_class_bind_template_child(widget_class, LadybirdBrowserWindow, location_entry);
     gtk_widget_class_bind_template_child(widget_class, LadybirdBrowserWindow, status_text);
+    gtk_widget_class_bind_template_child(widget_class, LadybirdBrowserWindow, tab_overview);
 }
 
 static void ladybird_browser_window_init(LadybirdBrowserWindow* self)
@@ -94,6 +96,7 @@ GMenu* browser_window_hamburger_menu(LadybirdBrowserWindow* window) { return win
 AdwToastOverlay* browser_window_toast_overlay(LadybirdBrowserWindow* window) { return window->toast_overlay; }
 GtkMenuButton* browser_window_menu_button(LadybirdBrowserWindow* window) { return window->menu_button; }
 LadybirdLocationEntry* browser_window_location_entry(LadybirdBrowserWindow* window) { return window->location_entry; }
+AdwTabOverview* browser_window_tab_overview(LadybirdBrowserWindow* window) { return window->tab_overview; }
 GtkLabel* browser_window_status_text(LadybirdBrowserWindow* window) { return window->status_text; }
 
 }

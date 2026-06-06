@@ -20,7 +20,7 @@ namespace Media {
 
 static constexpr int AUTO_SUSPEND_IDLE_TIMEOUT_MS = 10000;
 
-DecoderErrorOr<NonnullRefPtr<DecodedAudioProducer>> DecodedAudioProducer::try_create(NonnullRefPtr<Core::WeakEventLoopReference> const& main_thread_event_loop, NonnullRefPtr<Demuxer> const& demuxer, Track const& track)
+DecoderErrorOr<NonnullRefPtr<DecodedAudioProducer>> DecodedAudioProducer::try_create(Core::EventLoop& main_thread_event_loop, NonnullRefPtr<Demuxer> const& demuxer, Track const& track)
 {
     auto converter = DECODER_TRY_ALLOC(FFmpeg::FFmpegAudioConverter::try_create());
 
@@ -96,7 +96,7 @@ TimeRanges DecodedAudioProducer::buffered_time_ranges() const
     return m_thread_data->buffered_time_ranges();
 }
 
-DecodedAudioProducer::ThreadData::ThreadData(NonnullRefPtr<Core::WeakEventLoopReference> const& main_thread_event_loop, NonnullRefPtr<Demuxer> const& demuxer, Track const& track, AK::Duration duration, NonnullOwnPtr<Audio::AudioConverter>&& converter)
+DecodedAudioProducer::ThreadData::ThreadData(Core::EventLoop& main_thread_event_loop, NonnullRefPtr<Demuxer> const& demuxer, Track const& track, AK::Duration duration, NonnullOwnPtr<Audio::AudioConverter>&& converter)
     : m_main_thread_event_loop(main_thread_event_loop)
     , m_demuxer(demuxer)
     , m_track(track)
@@ -120,7 +120,7 @@ void DecodedAudioProducer::ThreadData::set_duration_change_handler(BlockEndTimeH
 ErrorOr<void> DecodedAudioProducer::ThreadData::set_output_sample_specification(Audio::SampleSpecification sample_specification)
 {
     TRY(m_converter->set_output_sample_specification(sample_specification));
-    return {};
+    return { };
 }
 
 void DecodedAudioProducer::ThreadData::set_wake_handler(PipelineWakeHandler handler)
@@ -189,7 +189,7 @@ DecoderErrorOr<void> DecodedAudioProducer::ThreadData::create_decoder()
     auto const& sample_specification = m_track.audio_data().sample_specification;
     auto codec_initialization_data = TRY(m_demuxer->get_codec_initialization_data_for_track(m_track));
     m_decoder = TRY(FFmpeg::FFmpegAudioDecoder::try_create(codec_id, sample_specification, codec_initialization_data));
-    return {};
+    return { };
 }
 
 void DecodedAudioProducer::ThreadData::exit()
@@ -336,10 +336,7 @@ void DecodedAudioProducer::ThreadData::invoke_on_main_thread_while_locked(Invoke
 {
     if (m_requested_state == RequestedState::Exit)
         return;
-    auto event_loop = m_main_thread_event_loop->take();
-    if (!event_loop.is_alive())
-        return;
-    event_loop->deferred_invoke([self = NonnullRefPtr(*this), invokee = move(invokee)] mutable {
+    m_main_thread_event_loop.deferred_invoke([self = NonnullRefPtr(*this), invokee = move(invokee)] mutable {
         invokee(self);
     });
 }
@@ -402,7 +399,7 @@ DecoderErrorOr<void> DecodedAudioProducer::ThreadData::retrieve_next_block(Audio
     if (block.timestamp_in_frames() < m_last_output_frame)
         block.set_timestamp_in_frames(m_last_output_frame);
     m_last_output_frame = block.end_timestamp_in_frames();
-    return {};
+    return { };
 }
 
 void DecodedAudioProducer::ThreadData::resolve_seek(u32 seek_id, bool moved_position)
@@ -591,7 +588,7 @@ void DecodedAudioProducer::ThreadData::push_data_and_decode_a_block()
             if (block_result.error().category() == DecoderErrorCategory::NeedsMoreInput)
                 break;
             if (block_result.error().category() == DecoderErrorCategory::EndOfStream)
-                set_halting_status_and_wait_for_seek(PipelineStatus::EndOfStream, {});
+                set_halting_status_and_wait_for_seek(PipelineStatus::EndOfStream, { });
             else
                 set_halting_status_and_wait_for_seek(PipelineStatus::Error, block_result.release_error());
             break;

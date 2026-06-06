@@ -52,7 +52,7 @@ ErrorOr<NonnullRefPtr<Session>> Session::create(NonnullRefPtr<Client> client, Js
     // -> Otherwise
     else {
         // Set a property of capabilities with name "proxy" and a value that is a new JSON Object.
-        capabilities.set("proxy"sv, JsonObject {});
+        capabilities.set("proxy"sv, JsonObject { });
     }
 
     // FIXME: 4. If capabilites has a property named "acceptInsecureCerts", set the endpoint node's accept insecure TLS flag
@@ -102,7 +102,7 @@ ErrorOr<NonnullRefPtr<Session>> Session::create(NonnullRefPtr<Client> client, Js
         // 5. Set a property on capabilities with name "timeouts" and value serialize the timeouts configuration with
         //    session's session timeouts.
         capabilities.set("timeouts"sv, session->m_timeouts_configuration.value_or_lazy_evaluated([]() {
-            return Web::WebDriver::timeouts_object({});
+            return Web::WebDriver::timeouts_object({ });
         }));
     }
 
@@ -128,7 +128,7 @@ Session::Session(NonnullRefPtr<Client> client, JsonObject const& capabilities, S
     , m_options(capabilities)
     , m_session_id(move(session_id))
     , m_session_flags(flags)
-    , m_event_loop(Core::EventLoop::current_weak())
+    , m_event_loop(Core::EventLoop::current())
 {
 }
 
@@ -173,7 +173,7 @@ void Session::close()
         // NOTE: This is handled by the WebContent process.
 
         // 2. Set the user prompt handler to null.
-        Web::WebDriver::set_user_prompt_handler({});
+        Web::WebDriver::set_user_prompt_handler({ });
 
         // FIXME: 3. Unset the accept insecure TLS flag.
 
@@ -204,7 +204,7 @@ void Session::close()
     if (!m_web_content_endpoint.is_empty())
         MUST(Core::System::unlink(m_web_content_endpoint));
 #endif
-    m_web_content_endpoint = {};
+    m_web_content_endpoint = { };
 
     // 5. If an error has occurred in any of the steps above, return the error, otherwise return success with data null.
 }
@@ -253,9 +253,9 @@ ErrorOr<void> Session::accept_web_content_transport(NonnullOwnPtr<IPC::Transport
         if (m_current_window_handle.is_empty())
             m_current_window_handle = window_handle;
 
-        promise->resolve({});
+        promise->resolve({ });
     };
-    return {};
+    return { };
 }
 
 ErrorOr<void> Session::create_server(NonnullRefPtr<ServerPromise> promise)
@@ -278,9 +278,7 @@ ErrorOr<void> Session::create_server(NonnullRefPtr<ServerPromise> promise)
     m_web_content_mach_port_server->on_bootstrap_request = [this, promise](auto request) {
         auto result = m_transport_bootstrap_server.handle_bootstrap_request(request.pid, move(request.reply_port));
         if (result.is_error()) {
-            auto event_loop = m_event_loop->take();
-            VERIFY(event_loop);
-            event_loop->deferred_invoke([promise, error = result.release_error()]() mutable {
+            m_event_loop.deferred_invoke([promise, error = result.release_error()]() mutable {
                 promise->resolve(move(error));
             });
             return;
@@ -291,16 +289,14 @@ ErrorOr<void> Session::create_server(NonnullRefPtr<ServerPromise> promise)
                 VERIFY_NOT_REACHED();
             },
             [this, promise](IPC::TransportBootstrapMachServer::OnDemandTransport& transport) {
-                auto event_loop = m_event_loop->take();
-                VERIFY(event_loop);
-                event_loop->deferred_invoke([this, promise, transport = move(transport.ports)]() mutable {
+                m_event_loop.deferred_invoke([this, promise, transport = move(transport.ports)]() mutable {
                     if (auto result = accept_web_content_transport(make<IPC::Transport>(move(transport.receive_right), move(transport.send_right)), promise); result.is_error())
                         promise->resolve(result.release_error());
                 });
             });
     };
 
-    return {};
+    return { };
 #else
     (void)Core::System::unlink(m_web_content_endpoint);
 
@@ -322,7 +318,7 @@ ErrorOr<void> Session::create_server(NonnullRefPtr<ServerPromise> promise)
     };
 
     m_web_content_server = server;
-    return {};
+    return { };
 #endif
 }
 
@@ -343,13 +339,13 @@ ErrorOr<void> Session::start(LaunchBrowserCallback const& launch_browser_callbac
     //        errors received while accepting the Browser and WebContent sockets.
     TRY(TRY(promise->await()));
 
-    return {};
+    return { };
 }
 
 Web::WebDriver::Response Session::set_timeouts(JsonValue payload)
 {
     m_timeouts_configuration = TRY(web_content_connection().set_timeouts(move(payload)));
-    return JsonValue {};
+    return JsonValue { };
 }
 
 // 11.2 Close Window, https://w3c.github.io/webdriver/#dfn-close-window
@@ -389,14 +385,14 @@ Web::WebDriver::Response Session::switch_to_window(StringView handle)
     TRY(web_content_connection().switch_to_window(m_current_window_handle));
 
     // 6. Return success with data null.
-    return JsonValue {};
+    return JsonValue { };
 }
 
 // 11.4 Get Window Handles, https://w3c.github.io/webdriver/#dfn-get-window-handles
 Web::WebDriver::Response Session::get_window_handles() const
 {
     // 1. Let handles be a JSON List.
-    JsonArray handles {};
+    JsonArray handles { };
 
     // 2. For each top-level browsing context in the remote end, push the associated window handle onto handles.
     for (auto const& window_handle : m_windows.keys()) {
@@ -410,7 +406,7 @@ Web::WebDriver::Response Session::get_window_handles() const
 ErrorOr<void, Web::WebDriver::Error> Session::ensure_current_window_handle_is_valid() const
 {
     if (auto current_window = m_windows.get(m_current_window_handle); current_window.has_value())
-        return {};
+        return { };
     return Web::WebDriver::Error::from_code(Web::WebDriver::ErrorCode::NoSuchWindow, "Window not found"sv);
 }
 
