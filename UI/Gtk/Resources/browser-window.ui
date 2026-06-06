@@ -150,6 +150,8 @@
                     <property name="halign">1</property>
                     <property name="valign">2</property>
                     <property name="ellipsize">2</property>
+                    <property name="opacity">0</property>
+                    <property name="can-target">false</property>
                   </object>
                 </child>
               </object>

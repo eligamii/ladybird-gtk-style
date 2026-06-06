@@ -47,11 +47,13 @@ public:
     void show_find_bar();
     void hide_find_bar();
 
-    void show_status_text(const char* text, int width);
+    void show_status_text(char const* text);
     void hide_status_text();
 
     void on_devtools_enabled();
     void on_devtools_disabled();
+
+    void on_pointer_motion(double x, double y);
 
     void show_toast(AdwToast* toast);
 
