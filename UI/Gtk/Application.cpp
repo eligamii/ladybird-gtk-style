@@ -39,22 +39,24 @@ Core::EventLoop& Application::create_platform_event_loop()
         if (g_application_get_is_remote(G_APPLICATION(m_adw_application)))
             forward_urls_to_remote_and_exit();
 
-        // Register icons and CSS stylesheet
+        // Register CSS stylesheet and icons
+        // NB: This is supposed to be done in GtkApplication::startup signal,
+        // but seems to only work here.
         auto* display = gdk_display_get_default();
-        auto* icon_theme = gtk_icon_theme_get_for_display(display);
-        gtk_icon_theme_add_resource_path(icon_theme, "/org/ladybird/Ladybird/gtk/icons/scalable/actions");
-
         auto* provider = gtk_css_provider_new();
         gtk_css_provider_load_from_resource(provider, "/org/ladybird/Ladybird/gtk/style.css");
-        gtk_style_context_add_provider_for_display(gdk_display_get_default(), GTK_STYLE_PROVIDER(provider), GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+        gtk_style_context_add_provider_for_display(display, GTK_STYLE_PROVIDER(provider), GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+
+        auto* icon_theme = gtk_icon_theme_get_for_display(display);
+        gtk_icon_theme_add_resource_path(icon_theme, "/org/ladybird/Ladybird/gtk/icons/scalable/actions");
 
         setup_dbus_handlers();
     }
 
-    auto& event_loop = WebView::Application::create_platform_event_loop();
+    auto event_loop = WebView::Application::create_platform_event_loop();
 
     if (!browser_options().headless_mode.has_value())
-        static_cast<EventLoopImplementationGtk&>(event_loop.impl()).set_main_loop();
+        static_cast<EventLoopImplementationGtk&>(event_loop->impl()).set_main_loop();
 
     return event_loop;
 }
@@ -113,13 +115,14 @@ void Application::on_activate()
 {
     if (auto* window = active_window())
         window->present();
-    else
+    else {
         new_window({});
+    }
 }
 
-BrowserWindow& Application::new_empty_window()
+BrowserWindow& Application::new_window(Vector<URL::URL> const& initial_urls)
 {
-    auto window = make<BrowserWindow>(m_adw_application);
+    auto window = make<BrowserWindow>(m_adw_application, initial_urls);
     auto& window_ref = *window;
     m_active_window = &window_ref;
 
@@ -158,21 +161,6 @@ BrowserWindow& Application::new_empty_window()
     window_ref.present();
     m_windows.append(move(window));
     return window_ref;
-}
-
-BrowserWindow& Application::new_window(Vector<URL::URL> const& initial_urls)
-{
-    auto& window = new_empty_window();
-
-    if (initial_urls.is_empty()) {
-        window.create_new_tab(Web::HTML::ActivateTab::Yes);
-    } else {
-        for (size_t i = 0; i < initial_urls.size(); ++i) {
-            window.create_new_tab(initial_urls[i], (i == 0) ? Web::HTML::ActivateTab::Yes : Web::HTML::ActivateTab::No);
-        }
-    }
-
-    return window;
 }
 
 void Application::remove_window(BrowserWindow& window)

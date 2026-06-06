@@ -360,7 +360,7 @@ public:
         GdkRectangle rect = {
             static_cast<int>(position.x() / device_pixel_ratio),
             static_cast<int>(position.y() / device_pixel_ratio),
-            1, 1
+            0, 0
         };
         gtk_popover_set_pointing_to(m_popover, &rect);
         gtk_popover_popup(m_popover);
