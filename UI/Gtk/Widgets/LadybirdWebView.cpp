@@ -28,7 +28,6 @@ struct KineticScrollState {
     }
 };
 
-
 #define LADYBIRD_WEB_VIEW(obj) (reinterpret_cast<LadybirdWebView*>(obj))
 #define LADYBIRD_TYPE_WEB_VIEW (ladybird_web_view_get_type())
 
@@ -203,7 +202,8 @@ static void on_mouse_leave(GtkEventControllerMotion*, gpointer user_data)
     self->impl->enqueue_native_event(Web::MouseEvent::Type::MouseLeave, 0, 0, 0, static_cast<GdkModifierType>(0), 0);
 }
 
-static void kinetic_scroll_callback(double time, gpointer user_data) {
+static void kinetic_scroll_callback(double time, gpointer user_data)
+{
     static constexpr double friction = 4;
 
     auto* self = LADYBIRD_WEB_VIEW(user_data);
@@ -239,7 +239,7 @@ static void kinetic_scroll_callback(double time, gpointer user_data) {
         .wheel_delta_x = wheel_delta_x,
         .wheel_delta_y = wheel_delta_y,
         .click_count = 0,
-        .browser_data = {},
+        .browser_data = { },
     };
     self->impl->enqueue_input_event(move(event));
 }

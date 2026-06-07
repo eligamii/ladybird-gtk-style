@@ -7,11 +7,15 @@
 #include <LibURL/Parser.h>
 #include <LibWebView/URL.h>
 #include <UI/Gtk/Application.h>
+
+#include "LibThreading/Thread.h"
+
 #include <UI/Gtk/BrowserWindow.h>
 #include <UI/Gtk/Dialogs.h>
 #include <UI/Gtk/EventLoopImplementationGtk.h>
 #include <UI/Gtk/Tab.h>
 #include <UI/Gtk/WebContentView.h>
+#include <thread>
 
 namespace Ladybird {
 
@@ -232,23 +236,42 @@ void Application::display_error_dialog(StringView error_message) const
     Dialogs::show_error(m_active_window->gtk_window(), error_message);
 }
 
-// GDK4 only provides an async clipboard API. Spin a nested event loop to read synchronously.
+// GDK4 only provides an async clipboard API. Spin an event loop to read synchronously.
 static Optional<ByteString> read_clipboard_text_sync()
 {
-    auto* clipboard = gdk_display_get_clipboard(gdk_display_get_default());
+    struct ClipboardCallbackUserData {
+        char* result;
+        GMainLoop* loop;
+    };
 
-    Optional<ByteString> result;
-    Core::EventLoop nested_loop;
+    auto* thread = g_thread_new(nullptr, [](void*) -> gpointer {
+        // LibCore's EventLoop won't work here
+        auto* clipboard = gdk_display_get_clipboard(gdk_display_get_default());
+        g_autofree auto* thread_main_context = g_main_context_new();
+        g_autofree auto* loop = g_main_loop_new(thread_main_context, false);
+        g_main_context_push_thread_default(thread_main_context);
 
-    gdk_clipboard_read_text_async(clipboard, nullptr, [](GObject* source, GAsyncResult* async_result, gpointer user_data) {
-        auto* result_ptr = static_cast<Optional<ByteString>*>(user_data);
-        g_autofree char* text = gdk_clipboard_read_text_finish(GDK_CLIPBOARD(source), async_result, nullptr);
-        if (text)
-            *result_ptr = ByteString(text);
-        Core::EventLoop::current().quit(0); }, &result);
+        ClipboardCallbackUserData data {
+            .result = nullptr,
+            .loop = loop
+        };
 
-    nested_loop.exec();
-    return result;
+        gdk_clipboard_read_text_async(clipboard, nullptr, [](GObject* source, GAsyncResult* async_result, gpointer user_data) {
+            auto* data = static_cast<ClipboardCallbackUserData*>(user_data);
+            data->result = gdk_clipboard_read_text_finish(GDK_CLIPBOARD(source), async_result, nullptr);
+            g_main_loop_quit(data->loop);
+        }, &data);
+
+        g_main_loop_run(loop);
+        g_main_context_pop_thread_default(thread_main_context);
+
+        return data.result;
+    }, nullptr);
+
+    if (g_autofree auto* text = static_cast<char*>(g_thread_join(thread)))
+        return ByteString(text);
+
+    return {};
 }
 
 Utf16String Application::clipboard_text(ClipboardType) const
