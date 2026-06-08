@@ -16,9 +16,14 @@
 
 namespace Ladybird {
 
+struct WebContentViewInitialState {
+    double maximum_frames_per_second { 60.0 };
+    Optional<u64> display_id;
+};
+
 class WebContentView final : public WebView::ViewImplementation {
 public:
-    WebContentView(LadybirdWebView* widget, RefPtr<WebView::WebContentClient> parent_client = nullptr, size_t page_index = 0);
+    WebContentView(LadybirdWebView* widget, RefPtr<WebView::WebContentClient> parent_client = nullptr, size_t page_index = 0, WebContentViewInitialState initial_state = {});
     virtual ~WebContentView() override;
 
     LadybirdWebView* gtk_widget() const { return m_widget; }
@@ -28,6 +33,9 @@ public:
     void set_device_pixel_ratio(double device_pixel_ratio);
     void set_widget(LadybirdWebView* widget) { m_widget = widget; }
     void paint(GtkSnapshot* snapshot);
+
+    void set_display_metadata(Optional<u64> display_id, double maximum_frames_per_second);
+    void update_compositor_display_metadata();
 
     void update_palette();
     void update_screen_rects();

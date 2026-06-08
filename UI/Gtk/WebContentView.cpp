@@ -30,13 +30,16 @@ static GdkRGBA to_gdk_rgba(Gfx::Color color)
     };
 }
 
-WebContentView::WebContentView(LadybirdWebView* widget, RefPtr<WebView::WebContentClient> parent_client, size_t page_index)
+WebContentView::WebContentView(LadybirdWebView* widget, RefPtr<WebView::WebContentClient> parent_client, size_t page_index, WebContentViewInitialState initial_state)
     : m_widget(widget)
 {
     m_client_state.client = parent_client;
     m_client_state.page_index = page_index;
 
     m_device_pixel_ratio = gtk_widget_get_scale_factor(GTK_WIDGET(widget));
+    m_maximum_frames_per_second = initial_state.maximum_frames_per_second;
+    m_display_id = initial_state.display_id;
+
     set_page_background_color_to_system_canvas(adw_style_manager_get_dark(adw_style_manager_get_default()));
 
     // Store ourselves in the GObject widget
@@ -271,6 +274,8 @@ Gfx::IntPoint WebContentView::to_widget_position(Gfx::IntPoint content_position)
 void WebContentView::initialize_client(CreateNewClient create_new_client)
 {
     ViewImplementation::initialize_client(create_new_client);
+
+    update_compositor_display_metadata();
     update_palette();
     update_screen_rects();
 }
@@ -282,6 +287,24 @@ void WebContentView::update_zoom()
 
     if (on_zoom_level_changed)
         on_zoom_level_changed();
+}
+
+void WebContentView::set_display_metadata(Optional<u64> display_id, double maximum_frames_per_second)
+{
+    m_display_id = display_id;
+    m_maximum_frames_per_second = maximum_frames_per_second;
+
+    client().async_set_maximum_frames_per_second(m_client_state.page_index, m_maximum_frames_per_second);
+    update_compositor_display_metadata();
+}
+
+void WebContentView::update_compositor_display_metadata()
+{
+    if (!m_client_state.client)
+        return;
+
+    auto compositor_context_id = client().compositor_context_id_for_page(m_client_state.page_index);
+    WebView::Application::the().update_compositor_display_metadata(compositor_context_id, m_display_id, m_maximum_frames_per_second);
 }
 
 void WebContentView::set_has_focus(bool has_focus)

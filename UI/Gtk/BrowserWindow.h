@@ -52,12 +52,18 @@ public:
 
     void show_toast(AdwToast* toast);
 
+    double refresh_rate() { return m_refresh_rate; }
+    Optional<u64> display_id() { return m_display_id; }
+
     static bool is_internal_url(URL::URL const& url);
 
 private:
     void setup_ui(AdwApplication* app);
     void register_actions();
     void setup_keyboard_shortcuts();
+    void setup_monitor(GdkMonitor* monitor);
+    void setup_monitor_signals();
+    void display_metadata_changed(int refresh_rate_mhz);
     void on_tab_close_request(AdwTabPage* page);
     void on_tab_switched();
     void bind_navigation_actions(WebContentView& view);
@@ -75,6 +81,10 @@ private:
     GtkSearchEntry* m_find_entry { nullptr };
     GtkLabel* m_find_result_label { nullptr };
     AdwToastOverlay* m_toast_overlay { nullptr };
+
+    double m_refresh_rate { 60.0 };
+    GdkMonitor* m_current_monitor { nullptr };
+    Optional<u64> m_display_id;
 
     struct ActionBinding {
         WebView::Action* action { nullptr };

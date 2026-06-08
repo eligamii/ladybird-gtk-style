@@ -212,6 +212,11 @@ void BrowserWindow::setup_ui(AdwApplication* app)
     g_menu_append_section(G_MENU(developer_tools_submenu.ptr()), "Debug", G_MENU_MODEL(debug_gmenu.ptr()));
     append_submenu_to_section_containing_action(LadybirdWidgets::browser_window_hamburger_menu(browser_window_widget), "win.new-window", "Developer Tools", G_MENU_MODEL(developer_tools_submenu.ptr()));
 
+    g_signal_connect_swapped(m_window, "realize", G_CALLBACK(+[](BrowserWindow* self) {
+        self->setup_monitor_signals();
+    }),
+        this);
+
     // Listen for fullscreen state changes
     g_signal_connect_swapped(m_window, "notify::fullscreened", G_CALLBACK(+[](BrowserWindow* self, GParamSpec*) {
         gboolean fullscreen = gtk_window_is_fullscreen(GTK_WINDOW(self->m_window));
@@ -265,6 +270,63 @@ void BrowserWindow::setup_keyboard_shortcuts()
     set_accels("win.fullscreen", { "F11" });
     set_accels("win.quit", { "<Ctrl>q" });
     set_accels("win.new-window", { "<Ctrl>n" });
+}
+
+void BrowserWindow::setup_monitor(GdkMonitor* monitor)
+{
+    static gsize monitor_id = 1;
+    g_object_set_data(G_OBJECT(monitor), "display-id", GSIZE_TO_POINTER(monitor_id));
+    monitor_id++;
+
+    g_signal_connect(monitor, "notify::refresh-rate", G_CALLBACK(+[](GdkMonitor* monitor, GParamSpec*, BrowserWindow* self) {
+        if (monitor == self->m_current_monitor)
+            self->display_metadata_changed(gdk_monitor_get_refresh_rate(monitor));
+    }),
+        this);
+}
+
+static u64 display_id_for_monitor(GdkMonitor* monitor)
+{
+    gpointer data_as_ptr = g_object_get_data(G_OBJECT(monitor), "display-id");
+    return GPOINTER_TO_SIZE(data_as_ptr);
+}
+
+void BrowserWindow::setup_monitor_signals()
+{
+    GdkSurface* surface = gtk_native_get_surface(GTK_NATIVE(m_window));
+
+    g_signal_connect_swapped(surface, "enter-monitor", G_CALLBACK(+[](BrowserWindow* self, GdkMonitor* monitor) {
+        self->m_current_monitor = monitor;
+        self->m_display_id = display_id_for_monitor(monitor);
+        self->display_metadata_changed(gdk_monitor_get_refresh_rate(monitor));
+    }),
+        this);
+
+    GListModel* monitors = gdk_display_get_monitors(gdk_display_get_default());
+
+
+    g_signal_connect(monitors, "items-changed", G_CALLBACK(+[](GListModel* monitors, guint pos, guint added, guint, BrowserWindow* self) {
+        for (guint i = 0; i < added; i++) {
+            GdkMonitor* monitor = GDK_MONITOR(g_list_model_get_item(monitors, pos + i));
+            self->setup_monitor(monitor);
+        }
+    }),
+        this);
+
+    for (guint i = 0; i < g_list_model_get_n_items(monitors); i++) {
+        GdkMonitor* monitor = GDK_MONITOR(g_list_model_get_item(monitors, i));
+        this->setup_monitor(monitor);
+    }
+}
+
+void BrowserWindow::display_metadata_changed(int refresh_rate_mhz)
+{
+    m_refresh_rate = static_cast<double>(refresh_rate_mhz) / 1000;
+
+    for (auto& tab : m_tabs) {
+        tab->view().set_display_metadata(m_display_id, m_refresh_rate);
+    }
+
 }
 
 void BrowserWindow::on_tab_switched()
