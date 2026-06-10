@@ -8,6 +8,7 @@
 #include <UI/Gtk/WebContentView.h>
 
 #include <adwaita.h>
+#include <fmt/base.h>
 #include <gdk/gdk.h>
 
 // Scroll constants and types
@@ -38,6 +39,8 @@ struct LadybirdWebView {
     double last_mouse_y { 0 };
 
     Optional<KineticScrollState> kinetic_scroll_state;
+
+    double last_scale_delta { 1 };
 };
 
 struct LadybirdWebViewClass {
@@ -340,6 +343,21 @@ static gboolean on_scroll(GtkEventControllerScroll* controller, gdouble dx, gdou
     return GDK_EVENT_STOP;
 }
 
+static void on_pinch_to_zoom(GtkGestureZoom* zoom_gesture, gdouble scale, gpointer user_data)
+{
+    auto* self = LADYBIRD_WEB_VIEW(user_data);
+
+    auto state = gtk_event_controller_get_current_event_state(GTK_EVENT_CONTROLLER(zoom_gesture));
+
+    Web::PinchEvent pinch_event;
+    pinch_event.modifiers = Ladybird::gdk_modifier_to_web(state);
+    pinch_event.scale_delta = scale - self->last_scale_delta;
+    pinch_event.position = { self->last_mouse_x, self->last_mouse_y };
+    self->impl->enqueue_input_event(pinch_event);
+
+    self->last_scale_delta = scale;
+}
+
 static void on_map(GtkWidget* widget, gpointer)
 {
     auto* self = LADYBIRD_WEB_VIEW(widget);
@@ -400,6 +418,11 @@ static void ladybird_web_view_init(LadybirdWebView* self)
     g_signal_connect(scroll_controller, "scroll", G_CALLBACK(on_scroll), self);
     g_signal_connect(scroll_controller, "decelerate", G_CALLBACK(on_decelerate), self);
     gtk_widget_add_controller(GTK_WIDGET(self), scroll_controller);
+
+    auto* pinch_to_zoom_gesture = gtk_gesture_zoom_new();
+    g_signal_connect(pinch_to_zoom_gesture, "scale-changed", G_CALLBACK(on_pinch_to_zoom), self);
+    g_signal_connect_swapped(pinch_to_zoom_gesture, "begin", G_CALLBACK(+[](LadybirdWebView* self) { self->last_scale_delta = 1; }), self);
+    gtk_widget_add_controller(GTK_WIDGET(self), GTK_EVENT_CONTROLLER(pinch_to_zoom_gesture));
 }
 
 // Public API
