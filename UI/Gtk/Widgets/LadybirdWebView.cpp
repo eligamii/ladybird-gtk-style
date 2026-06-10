@@ -189,6 +189,9 @@ static void on_mouse_motion(GtkEventControllerMotion* controller, gdouble x, gdo
 
     auto state = gtk_event_controller_get_current_event_state(GTK_EVENT_CONTROLLER(controller));
     self->impl->enqueue_native_event(Web::MouseEvent::Type::MouseMove, x, y, 0, state, 0);
+
+    if (self->kinetic_scroll_state.has_value())
+        self->kinetic_scroll_state->end_kinetic_scroll();
 }
 
 static void on_mouse_leave(GtkEventControllerMotion*, gpointer user_data)
